@@ -1,0 +1,568 @@
+---
+title: "ECON6027 Project (Group 4)"
+author: "Chan Ric (MQF '25), Wong Yu Xian May (DSTA + MSE '25), Gu Peiyao (Grant Thornton Singapore + MSE '25)"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Point pattern analysis
+
+```{r}
+library(aspace); library(sf); library(tmap); library(spatstat); library(ggplot2); library(dplyr)
+```
+
+1. Data preparation
+
+```{r}
+(sg_regions = st_read("MP14_PLNG_AREA_WEB_PL.shp"))
+(sg_map = tm_shape(sg_regions) +
+   tm_polygons(col="REGION_N", alpha=0.5, border.col="grey",
+               palette="Set2", legend.show=F))
+
+carpark = read.csv("HDBCarparkInformation.csv")
+head(carpark)
+tail(carpark)
+(carpark_sf = st_as_sf(carpark, coords=c("x_coord", "y_coord"), crs=3414))
+table(st_is_valid(carpark_sf))
+carpark_locations = sg_map +
+    tm_shape(carpark_sf) + tm_dots(size=0.001) + 
+    tm_layout(main.title="Locations of HDB carparks in Singapore", 
+              inner.margins=0.1)
+
+(bus = st_read("stops.geojson"))
+table(st_is_valid(bus))
+bus <- st_transform(bus, crs = 3414)
+table(st_is_valid(bus))
+bus_locations = sg_map +
+    tm_shape(bus) + tm_dots(size=0.001) + 
+    tm_layout(main.title="Locations of bus stops in Singapore", 
+              inner.margins=0.1)
+
+(rail = st_read("LTAMRTStationExitGEOJSON.geojson"))
+table(st_is_valid(rail))
+rail <- st_transform(rail, crs = 3414)
+table(st_is_valid(rail))
+rail_locations = sg_map +
+    tm_shape(rail) + tm_dots(size=0.001) + 
+    tm_layout(main.title="Locations of LRT/MRT exits in Singapore", 
+              inner.margins=0.1)
+```
+
+2. Spatial descriptive summary measures
+
+```{r}
+carpark_coords = st_coordinates(carpark_sf)
+mean = calc_mnc(id=1, points=carpark_coords)
+median = calc_mdc(id=2, points=carpark_coords)
+sdd = calc_sdd(id=3, calccentre=T, weighted=F, points=carpark_coords)
+(carpark_sdd_line = sdd$LOCATIONS %>%
+   st_as_sf(coords = c("x", "y"), crs=st_crs(carpark_sf)) %>%
+   st_combine() %>% st_cast("LINESTRING"))
+(carpark_std_dist = st_sf(sdd$ATTRIBUTES, geom=st_geometry(carpark_sdd_line)))
+sde = calc_sde(id=4, calccentre=T, weighted=F, points=carpark_coords)
+(carpark_sde_line = sde$LOCATIONS %>%
+    st_as_sf(coords = c("x", "y"), crs=st_crs(carpark_sf)) %>%
+    st_combine() %>% st_cast("LINESTRING"))
+(carpark_std_ellps = st_sf(sde$ATTRIBUTES, geom=st_geometry(carpark_sde_line)))
+(carpark_mean_median = rbind(mean$LOCATIONS, median$LOCATIONS) %>% data.frame() %>%
+   st_as_sf(coords=c("x","y"), crs=st_crs(carpark_sf)))
+carpark_mean_median$id = c("Spatial mean","Spatial median")
+carpark_mean_median
+
+bus_coords = st_coordinates(bus)
+mean = calc_mnc(id=1, points=bus_coords)
+median = calc_mdc(id=2, points=bus_coords)
+sdd = calc_sdd(id=3, calccentre=T, weighted=F, points=bus_coords)
+(bus_sdd_line = sdd$LOCATIONS %>%
+   st_as_sf(coords = c("x", "y"), crs=st_crs(bus)) %>%
+   st_combine() %>% st_cast("LINESTRING"))
+(bus_std_dist = st_sf(sdd$ATTRIBUTES, geom=st_geometry(bus_sdd_line)))
+sde = calc_sde(id=4, calccentre=T, weighted=F, points=bus_coords)
+(bus_sde_line = sde$LOCATIONS %>%
+    st_as_sf(coords = c("x", "y"), crs=st_crs(bus)) %>%
+    st_combine() %>% st_cast("LINESTRING"))
+(bus_std_ellps = st_sf(sde$ATTRIBUTES, geom=st_geometry(bus_sde_line)))
+(bus_mean_median = rbind(mean$LOCATIONS, median$LOCATIONS) %>% data.frame() %>%
+   st_as_sf(coords=c("x","y"), crs=st_crs(bus)))
+bus_mean_median$id = c("Spatial mean","Spatial median")
+bus_mean_median
+
+rail_coords = st_coordinates(rail)
+rail_coords = rail_coords[, 1:2]
+mean = calc_mnc(id=1, points=rail_coords)
+median = calc_mdc(id=2, points=rail_coords)
+sdd = calc_sdd(id=3, calccentre=T, weighted=F, points=rail_coords)
+(rail_sdd_line = sdd$LOCATIONS %>%
+   st_as_sf(coords = c("x", "y"), crs=st_crs(rail)) %>%
+   st_combine() %>% st_cast("LINESTRING"))
+(rail_std_dist = st_sf(sdd$ATTRIBUTES, geom=st_geometry(rail_sdd_line)))
+sde = calc_sde(id=4, calccentre=T, weighted=F, points=rail_coords)
+(rail_sde_line = sde$LOCATIONS %>%
+    st_as_sf(coords = c("x", "y"), crs=st_crs(rail)) %>%
+    st_combine() %>% st_cast("LINESTRING"))
+(rail_std_ellps = st_sf(sde$ATTRIBUTES, geom=st_geometry(rail_sde_line)))
+(rail_mean_median = rbind(mean$LOCATIONS, median$LOCATIONS) %>% data.frame() %>%
+   st_as_sf(coords=c("x","y"), crs=st_crs(rail)))
+rail_mean_median$id = c("Spatial mean","Spatial median")
+rail_mean_median
+
+sg_map +
+  tm_shape(carpark_sf) + 
+  tm_dots(col = "black", size = 0.01, title = "HDB carpark") +
+  tm_shape(bus) + 
+  tm_dots(col = "blue", size = 0.01, title = "Bus stop") +
+  tm_shape(taxi) + 
+  tm_dots(col = "red", size = 0.01, title = "LRT/MRT exit") +
+  tm_layout(main.title = "Locations of public transport stops/exits in Singapore",
+            inner.margins = 0.1,
+            legend.outside = TRUE,
+            legend.outside.position = "right") +
+  tm_compass() +
+  tm_add_legend(type = "symbol",
+                labels = c("HDB carpark", "Bus stop", "LRT/MRT exit"),
+                col = c("black", "blue", "red"), shape = 21)
+
+sg_map +
+  tm_shape(carpark_std_ellps) + tm_lines(lwd=2, col = "black") + 
+  tm_shape(carpark_std_dist) + tm_lines(lwd=2, lty=2, col = "black") +
+  tm_shape(bus_std_ellps) + tm_lines(lwd=2, col = "blue") +
+  tm_shape(bus_std_dist) + tm_lines(lwd=2, lty=2, col = "blue") +
+  tm_shape(rail_std_ellps) + tm_lines(lwd=2, col = "red") + 
+  tm_shape(rail_std_dist) + tm_lines(lwd=2, lty=2, col = "red") +
+  tm_shape(carpark_mean_median) + tm_dots(shape="id", col="black", title.shape="HDB carpark measures") + 
+  tm_shape(bus_mean_median) + tm_dots(shape="id", col="blue", title.shape="Bus stop measures") + 
+  tm_shape(rail_mean_median) + tm_dots(shape="id", col="red", title.shape="LRT/MRT exit measures") + 
+  tm_layout(main.title = "Spatial measures of public transport stops/exits in Singapore",
+            inner.margins = 0.1,
+            legend.outside = TRUE,
+            legend.outside.position = "right") +
+  tm_compass() +
+  tm_add_legend(type = "line",
+                labels = c("HDB carpark SDD", "Bus stop SDD", "LRT/MRT exit SDD"),
+                col = c("black", "blue", "red"), lty=2) + 
+  tm_add_legend(type = "line",
+                labels = c("HDB carpark SDE", "Bus stop SDE", "LRT/MRT exit SDE"),
+                col = c("black", "blue", "red"), lty=1)
+```
+
+3. Quadrat count analysis
+
+```{r}
+sg = st_union(sg_regions)
+(sg.owin = as.owin(sg)); class(sg.owin)
+
+st_bbox(carpark_sf)
+(carpark.ppp = as.ppp(carpark_sf))
+Window(carpark.ppp) = sg.owin
+
+st_bbox(bus)
+(bus.ppp = as.ppp(bus))
+Window(bus.ppp) = sg.owin
+
+st_bbox(rail)
+(rail.ppp = as.ppp(rail))
+Window(rail.ppp) = sg.owin
+
+par(mfrow = c(1, 3))
+plot(carpark.ppp, pch=20, cex=0.1, legend=FALSE)
+plot(bus.ppp, pch=20, cex=0.1, legend=FALSE)
+plot(rail.ppp, pch=20, cex=0.1, legend=FALSE)
+
+qc1 = quadratcount(carpark.ppp, nx=20, ny=20)
+qc2 = quadratcount(bus.ppp, nx=20, ny=20)
+qc3 = quadratcount(rail.ppp, nx=20, ny=20)
+
+plot(qc1)
+plot(qc2)
+plot(qc3)
+
+(quad.test = quadrat.test(carpark.ppp, nx=20, ny=20))
+quad.test$parameter
+(n = quad.test$parameter+1)
+(lambda = mean(quad.test$observed))
+(observed = table(quad.test$observed))
+(max.num = max(quad.test$observed))
+(max.freq = max(observed))
+plot(c(0,max.num),c(0,max.freq), type="n", 
+     xlab="Number of HDB carparks per quadrat (red = observed, blue = expected)", 
+     ylab="Frequency of occurrences", main="Quadrat counts: observed vs expected")
+points(dpois(0:max.num, lambda=lambda)*n, type="l", col="Blue", lwd=2)
+points(observed, col="Red", type="l", lwd=2)
+
+(quad.test = quadrat.test(bus.ppp, nx=20, ny=20))
+quad.test$parameter
+(n = quad.test$parameter+1)
+(lambda = mean(quad.test$observed))
+(observed = table(quad.test$observed))
+(max.num = max(quad.test$observed))
+(max.freq = max(observed))
+plot(c(0,max.num),c(0,max.freq), type="n", 
+     xlab="Number of bus stops per quadrat (red = observed, blue = expected)", 
+     ylab="Frequency of occurrences", main="Quadrat counts: observed vs expected")
+points(dpois(0:max.num, lambda=lambda)*n, type="l", col="Blue", lwd=2)
+points(observed, col="Red", type="l", lwd=2)
+
+(quad.test = quadrat.test(rail.ppp, nx=20, ny=20))
+quad.test$parameter
+(n = quad.test$parameter+1)
+(lambda = mean(quad.test$observed))
+(observed = table(quad.test$observed))
+(max.num = max(quad.test$observed))
+(max.freq = max(observed))
+plot(c(0,max.num),c(0,max.freq), type="n", 
+     xlab="Number of LRT/MRT exits per quadrat (red = observed, blue = expected)", 
+     ylab="Frequency of occurrences", main="Quadrat counts: observed vs expected")
+points(dpois(0:max.num, lambda=lambda)*n, type="l", col="Blue", lwd=2)
+points(observed, col="Red", type="l", lwd=2)
+```
+
+4. Kernel density estimation (KDE)
+
+```{r}
+## Diggle’s method
+(carpark.bw = bw.diggle(carpark.ppp))
+carpark.gaussian = density(carpark.ppp, bw.diggle)
+carpark.epanechnikov = density(carpark.ppp, sigma=bw.diggle(carpark.ppp),
+                               kernel="epanechnikov")
+carpark.quartic = density(carpark.ppp, sigma=bw.diggle(carpark.ppp),
+                          kernel="quartic")
+carpark.disc = density(carpark.ppp, sigma=bw.diggle(carpark.ppp),
+                       kernel="disc")
+
+par(mfrow = c(2, 2), mar = c(1, 1, 1, 1))
+plot(carpark.gaussian, main="Gaussian")
+plot(carpark.epanechnikov, main="epanechnikov")
+plot(carpark.quartic, main="quartic")
+plot(carpark.disc, main="disc")
+
+## Point process likelihood cross-validation method
+(carpark.bw = bw.ppl(carpark.ppp))
+carpark.gaussian = density(carpark.ppp, bw.ppl)
+carpark.epanechnikov = density(carpark.ppp, sigma=bw.ppl(carpark.ppp),
+                               kernel="epanechnikov")
+carpark.quartic = density(carpark.ppp, sigma=bw.ppl(carpark.ppp),
+                          kernel="quartic")
+carpark.disc = density(carpark.ppp, sigma=bw.ppl(carpark.ppp),
+                       kernel="disc")
+plot(carpark.gaussian, main="Gaussian")
+plot(carpark.epanechnikov, main="epanechnikov")
+plot(carpark.quartic, main="quartic")
+plot(carpark.disc, main="disc")
+
+## Scott’s method
+(carpark.bw = bw.scott(carpark.ppp))
+carpark.gaussian = density(carpark.ppp, bw.scott)
+carpark.epanechnikov = density(carpark.ppp, sigma=bw.scott(carpark.ppp),
+                               kernel="epanechnikov")
+carpark.quartic = density(carpark.ppp, sigma=bw.scott(carpark.ppp),
+                          kernel="quartic")
+carpark.disc = density(carpark.ppp, sigma=bw.scott(carpark.ppp),
+                       kernel="disc")
+plot(carpark.gaussian, main="Gaussian")
+plot(carpark.epanechnikov, main="epanechnikov")
+plot(carpark.quartic, main="quartic")
+plot(carpark.disc, main="disc")
+
+## Cronie and van Lieshout's criterion method
+(carpark.bw = bw.CvL(carpark.ppp))
+carpark.gaussian = density(carpark.ppp, bw.CvL)
+carpark.epanechnikov = density(carpark.ppp, sigma=bw.CvL(carpark.ppp),
+                               kernel="epanechnikov")
+carpark.quartic = density(carpark.ppp, sigma=bw.CvL(carpark.ppp),
+                          kernel="quartic")
+carpark.disc = density(carpark.ppp, sigma=bw.CvL(carpark.ppp),
+                       kernel="disc")
+plot(carpark.gaussian, main="Gaussian")
+plot(carpark.epanechnikov, main="epanechnikov")
+plot(carpark.quartic, main="quartic")
+plot(carpark.disc, main="disc")
+
+## Window geometry (frac) method
+(carpark.bw = bw.frac(carpark.ppp))
+carpark.gaussian = density(carpark.ppp, bw.frac)
+carpark.epanechnikov = density(carpark.ppp, sigma=bw.frac(carpark.ppp),
+                               kernel="epanechnikov")
+carpark.quartic = density(carpark.ppp, sigma=bw.frac(carpark.ppp),
+                          kernel="quartic")
+carpark.disc = density(carpark.ppp, sigma=bw.frac(carpark.ppp),
+                       kernel="disc")
+plot(carpark.gaussian, main="Gaussian")
+plot(carpark.epanechnikov, main="epanechnikov")
+plot(carpark.quartic, main="quartic")
+plot(carpark.disc, main="disc")
+
+## Diggle’s method
+(bus.bw = bw.diggle(bus.ppp))
+bus.gaussian = density(bus.ppp, bw.diggle)
+bus.epanechnikov = density(bus.ppp, sigma=bw.diggle(bus.ppp),
+                           kernel="epanechnikov")
+bus.quartic = density(bus.ppp, sigma=bw.diggle(bus.ppp),
+                      kernel="quartic")
+bus.disc = density(bus.ppp, sigma=bw.diggle(bus.ppp),
+                   kernel="disc")
+plot(bus.gaussian, main="Gaussian")
+plot(bus.epanechnikov, main="epanechnikov")
+plot(bus.quartic, main="quartic")
+plot(bus.disc, main="disc")
+
+## Point process likelihood cross-validation method
+(bus.bw = bw.ppl(bus.ppp))
+bus.gaussian = density(bus.ppp, bw.ppl)
+bus.epanechnikov = density(bus.ppp, sigma=bw.ppl(bus.ppp),
+                           kernel="epanechnikov")
+bus.quartic = density(bus.ppp, sigma=bw.ppl(bus.ppp),
+                      kernel="quartic")
+bus.disc = density(bus.ppp, sigma=bw.ppl(bus.ppp),
+                   kernel="disc")
+plot(bus.gaussian, main="Gaussian")
+plot(bus.epanechnikov, main="epanechnikov")
+plot(bus.quartic, main="quartic")
+plot(bus.disc, main="disc")
+
+## Scott’s method
+(bus.bw = bw.scott(bus.ppp))
+bus.gaussian = density(bus.ppp, bw.scott)
+bus.epanechnikov = density(bus.ppp, sigma=bw.scott(bus.ppp),
+                           kernel="epanechnikov")
+bus.quartic = density(bus.ppp, sigma=bw.scott(bus.ppp),
+                      kernel="quartic")
+bus.disc = density(bus.ppp, sigma=bw.scott(bus.ppp),
+                   kernel="disc")
+plot(bus.gaussian, main="Gaussian")
+plot(bus.epanechnikov, main="epanechnikov")
+plot(bus.quartic, main="quartic")
+plot(bus.disc, main="disc")
+
+## Cronie and van Lieshout's criterion method
+(bus.bw = bw.CvL(bus.ppp))
+bus.gaussian = density(bus.ppp, bw.CvL)
+bus.epanechnikov = density(bus.ppp, sigma=bw.CvL(bus.ppp),
+                           kernel="epanechnikov")
+bus.quartic = density(bus.ppp, sigma=bw.CvL(bus.ppp),
+                      kernel="quartic")
+bus.disc = density(bus.ppp, sigma=bw.CvL(bus.ppp),
+                   kernel="disc")
+plot(bus.gaussian, main="Gaussian")
+plot(bus.epanechnikov, main="epanechnikov")
+plot(bus.quartic, main="quartic")
+plot(bus.disc, main="disc")
+
+## Window geometry (frac) method
+(bus.bw = bw.frac(bus.ppp))
+bus.gaussian = density(bus.ppp, bw.frac)
+bus.epanechnikov = density(bus.ppp, sigma=bw.frac(bus.ppp),
+                           kernel="epanechnikov")
+bus.quartic = density(bus.ppp, sigma=bw.frac(bus.ppp),
+                      kernel="quartic")
+bus.disc = density(bus.ppp, sigma=bw.frac(bus.ppp),
+                   kernel="disc")
+plot(bus.gaussian, main="Gaussian")
+plot(bus.epanechnikov, main="epanechnikov")
+plot(bus.quartic, main="quartic")
+plot(bus.disc, main="disc")
+
+## Diggle’s method
+(rail.bw = bw.diggle(rail.ppp))
+rail.gaussian = density(rail.ppp, bw.diggle)
+rail.epanechnikov = density(rail.ppp, sigma=bw.diggle(rail.ppp),
+                            kernel="epanechnikov")
+rail.quartic = density(rail.ppp, sigma=bw.diggle(rail.ppp),
+                       kernel="quartic")
+rail.disc = density(rail.ppp, sigma=bw.diggle(rail.ppp),
+                    kernel="disc")
+plot(rail.gaussian, main="Gaussian")
+plot(rail.epanechnikov, main="epanechnikov")
+plot(rail.quartic, main="quartic")
+plot(rail.disc, main="disc")
+
+## Point process likelihood cross-validation method
+(rail.bw = bw.ppl(rail.ppp))
+rail.gaussian = density(rail.ppp, bw.ppl)
+rail.epanechnikov = density(rail.ppp, sigma=bw.ppl(rail.ppp),
+                            kernel="epanechnikov")
+rail.quartic = density(rail.ppp, sigma=bw.ppl(rail.ppp),
+                       kernel="quartic")
+rail.disc = density(rail.ppp, sigma=bw.ppl(rail.ppp),
+                    kernel="disc")
+plot(rail.gaussian, main="Gaussian")
+plot(rail.epanechnikov, main="epanechnikov")
+plot(rail.quartic, main="quartic")
+plot(rail.disc, main="disc")
+
+## Scott’s method
+(rail.bw = bw.scott(rail.ppp))
+rail.gaussian = density(rail.ppp, bw.scott)
+rail.epanechnikov = density(rail.ppp, sigma=bw.scott(rail.ppp),
+                            kernel="epanechnikov")
+rail.quartic = density(rail.ppp, sigma=bw.scott(rail.ppp),
+                       kernel="quartic")
+rail.disc = density(rail.ppp, sigma=bw.scott(rail.ppp),
+                    kernel="disc")
+plot(rail.gaussian, main="Gaussian")
+plot(rail.epanechnikov, main="epanechnikov")
+plot(rail.quartic, main="quartic")
+plot(rail.disc, main="disc")
+
+## Cronie and van Lieshout's criterion method
+(rail.bw = bw.CvL(rail.ppp))
+rail.gaussian = density(rail.ppp, bw.CvL)
+rail.epanechnikov = density(rail.ppp, sigma=bw.CvL(rail.ppp),
+                            kernel="epanechnikov")
+rail.quartic = density(rail.ppp, sigma=bw.CvL(rail.ppp),
+                       kernel="quartic")
+rail.disc = density(rail.ppp, sigma=bw.CvL(rail.ppp),
+                    kernel="disc")
+plot(rail.gaussian, main="Gaussian")
+plot(rail.epanechnikov, main="epanechnikov")
+plot(rail.quartic, main="quartic")
+plot(rail.disc, main="disc")
+
+## Window geometry (frac) method
+(rail.bw = bw.frac(rail.ppp))
+rail.gaussian = density(rail.ppp, bw.frac)
+rail.epanechnikov = density(rail.ppp, sigma=bw.frac(rail.ppp),
+                            kernel="epanechnikov")
+rail.quartic = density(rail.ppp, sigma=bw.frac(rail.ppp),
+                       kernel="quartic")
+rail.disc = density(rail.ppp, sigma=bw.frac(rail.ppp),
+                    kernel="disc")
+plot(rail.gaussian, main="Gaussian")
+plot(rail.epanechnikov, main="epanechnikov")
+plot(rail.quartic, main="quartic")
+plot(rail.disc, main="disc")
+```
+
+5. Nearest neighbour distance analysis
+
+```{r}
+carpark.nnd = nndist(carpark.ppp, k=1)
+summary(carpark.nnd)
+
+bus.nnd = nndist(bus.ppp, k=1)
+summary(bus.nnd)
+
+rail.nnd = nndist(rail.ppp, k=1)
+summary(rail.nnd)
+
+par(mfrow = c(1, 3))
+hist(carpark.nnd)
+hist(bus.nnd)
+hist(rail.nnd)
+
+carpark.nnd = as.matrix(carpark.nnd)
+(r.bar = sum(carpark.nnd)/nrow(carpark.nnd))
+(Er = 0.5*sqrt(area.owin(sg.owin)/nrow(carpark.nnd)))
+(CE.index = r.bar/Er) 
+(Zstat = ((r.bar-Er)/0.26136)*sqrt(nrow(carpark.nnd)^2/area.owin(sg.owin)))
+
+clarkevans(carpark.ppp, correction="all",
+           clipregion=sg.owin)
+clarkevans.test(carpark.ppp, correction="none", alternative="greater",
+                clipregion=sg.owin)
+clarkevans.test(carpark.ppp, correction="guard", alternative="greater",
+                clipregion=sg.owin)
+clarkevans.test(carpark.ppp, correction="cdf", alternative="greater",
+                clipregion=sg.owin)
+clarkevans.test(carpark.ppp, correction="none", alternative="clustered",
+                clipregion=sg.owin)
+clarkevans.test(carpark.ppp, correction="guard", alternative="clustered",
+                clipregion=sg.owin)
+clarkevans.test(carpark.ppp, correction="cdf", alternative="clustered",
+                clipregion=sg.owin)
+clarkevans.test(carpark.ppp, correction="none", alternative="regular",
+                clipregion=sg.owin)
+clarkevans.test(carpark.ppp, correction="guard", alternative="regular",
+                clipregion=sg.owin)
+clarkevans.test(carpark.ppp, correction="cdf", alternative="regular",
+                clipregion=sg.owin)
+
+bus.nnd = as.matrix(bus.nnd)
+(r.bar = sum(bus.nnd)/nrow(bus.nnd))
+(Er = 0.5*sqrt(area.owin(sg.owin)/nrow(bus.nnd)))
+(CE.index = r.bar/Er) 
+(Zstat = ((r.bar-Er)/0.26136)*sqrt(nrow(bus.nnd)^2/area.owin(sg.owin)))
+
+clarkevans(bus.ppp, correction="all",
+           clipregion=sg.owin)
+clarkevans.test(bus.ppp, correction="none", alternative="greater",
+                clipregion=sg.owin)
+clarkevans.test(bus.ppp, correction="guard", alternative="greater",
+                clipregion=sg.owin)
+clarkevans.test(bus.ppp, correction="cdf", alternative="greater",
+                clipregion=sg.owin)
+clarkevans.test(bus.ppp, correction="none", alternative="clustered",
+                clipregion=sg.owin)
+clarkevans.test(bus.ppp, correction="guard", alternative="clustered",
+                clipregion=sg.owin)
+clarkevans.test(bus.ppp, correction="cdf", alternative="clustered",
+                clipregion=sg.owin)
+clarkevans.test(bus.ppp, correction="none", alternative="regular",
+                clipregion=sg.owin)
+clarkevans.test(bus.ppp, correction="guard", alternative="regular",
+                clipregion=sg.owin)
+clarkevans.test(bus.ppp, correction="cdf", alternative="regular",
+                clipregion=sg.owin)
+
+rail.nnd = as.matrix(rail.nnd)
+(r.bar = sum(rail.nnd)/nrow(rail.nnd))
+(Er = 0.5*sqrt(area.owin(sg.owin)/nrow(rail.nnd)))
+(CE.index = r.bar/Er) 
+(Zstat = ((r.bar-Er)/0.26136)*sqrt(nrow(rail.nnd)^2/area.owin(sg.owin)))
+
+clarkevans(rail.ppp, correction="all",
+           clipregion=sg.owin)
+clarkevans.test(rail.ppp, correction="none", alternative="greater",
+                clipregion=sg.owin)
+clarkevans.test(rail.ppp, correction="guard", alternative="greater",
+                clipregion=sg.owin)
+clarkevans.test(rail.ppp, correction="cdf", alternative="greater",
+                clipregion=sg.owin)
+clarkevans.test(rail.ppp, correction="none", alternative="clustered",
+                clipregion=sg.owin)
+clarkevans.test(rail.ppp, correction="guard", alternative="clustered",
+                clipregion=sg.owin)
+clarkevans.test(rail.ppp, correction="cdf", alternative="clustered",
+                clipregion=sg.owin)
+clarkevans.test(rail.ppp, correction="none", alternative="regular",
+                clipregion=sg.owin)
+clarkevans.test(rail.ppp, correction="guard", alternative="regular",
+                clipregion=sg.owin)
+clarkevans.test(rail.ppp, correction="cdf", alternative="regular",
+                clipregion=sg.owin)
+```
+
+6. $K$-function analysis
+
+```{r}
+carpark.ppp = as.ppp(carpark_sf)
+par(mfrow = c(1, 3))
+kf.env_SG = envelope(carpark.ppp, Kest, correction="best")
+plot(kf.env_SG, main="K-function")
+lf.env_SG = envelope(carpark.ppp, Lest, correction="best")
+plot(lf.env_SG, main="L-function")
+gf.env_SG = envelope(carpark.ppp, Gest, correction="best")
+plot(gf.env_SG, main="G-function")
+
+bus.ppp = as.ppp(bus)
+kf.env_SG = envelope(bus.ppp, Kest, correction="best")
+plot(kf.env_SG, main="K-function")
+lf.env_SG = envelope(bus.ppp, Lest, correction="best")
+plot(lf.env_SG, main="L-function")
+gf.env_SG = envelope(bus.ppp, Gest, correction="best")
+plot(gf.env_SG, main="G-function")
+
+rail.ppp <- as.ppp(rail)
+kf.env_SG = envelope(rail.ppp, Kest, correction="best")
+plot(kf.env_SG, main="K-function")
+lf.env_SG = envelope(rail.ppp, Lest, correction="best")
+plot(lf.env_SG, main="L-function")
+gf.env_SG = envelope(rail.ppp, Gest, correction="best")
+plot(gf.env_SG, main="G-function")
+```
+
+Test

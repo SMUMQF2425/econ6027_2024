@@ -1,0 +1,183 @@
+---
+title: "ECON6027_3a"
+author: "Dr. Liu"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Mapping with TMAP
+
+Load the required packages.
+
+```{r}
+# install.packages("tmap", repos = c("https://r-tmap.r-universe.dev", "https://cloud.r-project.org"))
+library(sf); library(spData); library(tmap)
+```
+
+## TMAP basics
+
+tm_shape() provides the basic building block which accepts input data for the sf object. Layers are added on top to customise the visualisation aesthetics. For example,
+
+```{r}
+tm_shape(world)+tm_borders()
+# plot(st_geometry(world))
+tm_shape(world)+tm_fill()
+tm_shape(world)+tm_fill()+tm_borders()
+```
+
+We can store map objects (known as tmap objects) for later use.
+
+```{r}
+nz # polygon object
+nz_map = tm_shape(nz) + tm_fill() + tm_borders()
+class(nz_map)
+print(nz_map)
+nz_height # point object
+nz.h_map = nz_map + tm_shape(nz_height) + tm_bubbles()
+print(nz.h_map)
+```
+
+Let us create another object of the territorial waters of nz and plot them together. In the chunk below, we
+- add the territorial waters (22.2km),
+- st_union: dissolve borders and combine all polygons,
+- feed the output to create a buffer,
+- change the buffer to a LINESTRING and
+- tmap_arrange() is used to arrange the two maps together.
+
+Notice the use of "chaining" to combine different lines of code into one. When chaining, the output of the previous link is the input for the next, so, we write the code without the input argument in the subsequent links.
+
+```{r}
+nz_water = st_union(nz) %>% st_buffer(22200) %>% st_cast(to = "LINESTRING") 
+# %>% is called the chain/pipe operator
+nz_water # line object
+nz.tw_map = nz_map + tm_shape(nz_water) + tm_lines()
+# notice the new new tmap element
+tmap_arrange(nz.h_map, nz.tw_map)
+```
+
+The objects we create using the TMAP package can be saved for later use. tmap_save() is used to to save tmap objects into the directory. Supported extensions: pdf, eps, svg, wmf(Windows only), png, jpg, bmp, tiff, and html.
+
+```{r}
+# tmap_save(tmap_object, 'xx.jpg') 
+```
+
+## TMAP aesthetics 
+
+The empty tmap layers such as tm_fill, tm_borders,tm_lines, tm_bubbles, tm_squares, tm_dots, etc. that created before can be filled with aesthetic arguments.
+
+tm_polygons() plots the geometry column by default. What if you want to plot an attribute other than the geometry column?
+
+```{r}
+head(nz)
+# Basic plot using base R plot function
+plot(st_geometry(nz), col = nz$Land_area, main="Regions of NZ")
+# The same using tmap
+tm_shape(nz) + tm_fill(col = "Land_area") 
+# tm_shape(nz) + tm_fill(col = "Land_area") + tm_layout(legend.outside = T)
+```
+
+To add legend title (not map title) and change colour palette using “RColorBrewer” package:
+
+```{r}
+tm_shape(nz) + tm_fill(col = "Land_area", title = "Regions of NZ", palette="Pastel2")
+# tm_shape(nz) + tm_fill(col = "Land_area", title = "Regions of NZ", palette="Pastel2") + tm_layout(legend.outside = T)
+# RColorBrewer::display.brewer.all()
+```
+
+To add polygon borders:
+
+```{r}
+tm_shape(nz) + tm_polygons(col = "Land_area", title = "Regions of NZ")
+```
+
+To add a compass and a scale bar:
+
+```{r}
+nz_map + tm_compass(type = "rose", position = c("left", "top"), size = 1.5) + tm_scale_bar(breaks = c(0, 250, 500))
+```
+
+To add a map title using layout options. The grammar option tm_layout() spells out global options:
+
+```{r}
+nz_map + tm_compass(type = "rose", position = c("left", "top"), size = 1.5) + tm_scale_bar(breaks = c(0, 100, 200)) + tm_layout(main.title="New Zealand", main.title.size = 1)
+```
+
+## Animated maps
+
+We will prepare an animated map of the maps of Asian countries extracted from the "world" dataset from spData.
+
+```{r}
+asia = world[world$continent=="Asia", ]
+asia_maps = tm_shape(asia) + tm_polygons("yellow") + tm_facets(along = "name_long")
+```
+
+If filename is omitted (default), the animation will be shown in the viewer or browser. If specified, it should be a gif file or a video file (i.e. mp4).
+
+The package "gifski" is required to create a gif animation. The package "av" is required for video formats. The mp4 format is recommended.
+
+```{r}
+tmap_animation(asia_maps, filename="asian_countries.gif", width=800, delay=100)
+tmap_animation(asia_maps, filename="asian_countries.mp4", width=800, delay=100)
+```
+
+## Interactive maps
+
+Interactivity can take many forms, the most common and useful of which is the ability to pan around and zoom into any part of a geographic dataset overlaid on a ‘web map’ to show context. The most important type of interactivity, is the display of geographic data on interactive web maps.
+ 
+There are many ways to create interactive maps in R. One way is using the leaflet package. For more information, visit https://rstudio.github.io/leaflet/
+
+```{r}
+nz_map = tm_shape(nz) + tm_polygons()
+tmap_mode("view")
+nz_map
+tmap_mode("plot")
+# or
+tmap_leaflet(nz_map) 
+```
+
+The leaflet package allows many base map options provided by different providers inclusing, "OpenTopoMap", "OpenStreetMap", "Esri.WorldImagery", "Esri.WorldTerrain", "Esri.WorldPhysical", "Esri.NatGeoWorldMap", "Esri.OceanBasemap", etc. To check for the full list of server options run: leaflet::providers. 
+
+Use the following chunk to change different base map options. Please note that some base maps are only suitable to specific regions. For example, server "MtbMap" is only suitable when mapping Europe.
+
+```{r}
+tmap_mode("view")
+nz_map + tm_basemap(server = "OpenTopoMap") # change server options
+tmap_mode("plot")
+```
+
+## Distorted maps
+
+Another fun thing you can do is to create distorted maps. We will use the package "cartogram". Using the package functions, geometry is proportionately distorted to represent a mapping variable!
+
+Load the contiguous USA map geography.
+
+```{r}
+us_states2163 = st_transform(us_states, 2163) # data need to have a projected CRS for tmap.
+tm_shape(us_states2163) + tm_polygons("total_pop_15")
+```
+
+Apply distortions and plot using the following chunk.
+
+```{r}
+library(cartogram)
+us_states2163_ncont = cartogram_ncont(us_states2163, "total_pop_15")
+us1 = tm_shape(us_states2163_ncont) + tm_polygons(col="total_pop_15")
+us_states2163_bubble = cartogram_dorling(us_states2163, "total_pop_15")
+us2 = tm_shape(us_states2163_bubble) + tm_polygons("total_pop_15")
+tmap_arrange(us1,us2)
+```
+
+# Exercise G
+```{r}
+sg = st_read("MySingapura.shp")
+tmap_mode("view")
+tm_shape(sg) + tm_borders()
+tm_shape(sg) + tm_borders() + tm_basemap(server = "OneMapSG.Default")
+tm_shape(sg) + tm_borders() + tm_basemap(server = "OpenTopoMap")
+tm_shape(sg) + tm_borders() + tm_basemap(server = "Esri.WorldStreetMap")
+```

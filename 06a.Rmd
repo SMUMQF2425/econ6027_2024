@@ -1,0 +1,162 @@
+---
+title: "ECON6027_6a"
+author: "Dr. Liu"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Read neighbours from an existing GAL file 
+
+Load the required libraries:
+
+```{r}
+library(sf); library(spdep)
+```
+
+Contiguity neighbour GAL file for UK
+
+```{r}
+(UK_nb = read.gal("uk_cont.gal"))
+class(UK_nb)
+```
+
+nb is a neighbour list object which is how neighbourhood information is handled in the R ecosystem.
+
+We also need a shapefile to anchor the external “nb” object to…
+
+```{r}
+(UK = st_read("NUTS_Level_1__January_2018__Boundaries.shp"))
+table(st_is_valid(UK)) # all valid
+```
+
+In general, after this step, you need to make sure the areal units are in the same order as the “nb” object. For your convenience, in this case, I have made sure that the object ID of the shapefile and the gal file are the same.
+
+Next, we will plot the contiguity relationships among the regions of UK on a map of UK.
+
+```{r}
+UK_coords = st_point_on_surface(st_geometry(UK))
+plot(st_geometry(UK), border="grey60", reset = F, main="nb from GAL file") 
+plot(UK_nb, UK_coords, pch=19, cex=0.6, add=T)
+# write.nb.gal(UK_nb, "UK_nb_new.gal", oldstyle=F) # create GAL file
+```
+
+See ?plot.nb for more details on plotting nb objects.
+
+## Create neighbours based on spatial polygons
+
+We will work with Singapore planning areas.
+
+```{r}
+SG = st_read("MySingapura.shp")
+table(st_is_valid(SG))
+SG = st_make_valid(SG); table(st_is_valid(SG))
+```
+
+### 1. Contiguous neighbours
+
+The poly2nb() function can be used to convert polygon objects to nb objects. The default is queen contiguity neighbours from SG. If we make queen=F, then we get the rook contiguity.
+
+```{r}
+(SG1_nb = poly2nb(SG)) # queen contiguity
+# write.nb.gal(SG1_nb, "SG1_nb.gal", oldstyle=F)
+(SG2_nb = poly2nb(SG, queen=F)) # rook contiguity
+# check the snap argument
+```
+
+Let us plot the contiguity neighbours on a map of Singapore.
+
+```{r}
+SG_coords = st_point_on_surface(st_geometry(SG))
+
+plot(st_geometry(SG), border="grey60", axes=T,  main="Queen Contiguity")
+plot(SG1_nb, SG_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(SG), border="grey60", axes=T,  main="Rook Contiguity")
+plot(SG2_nb, SG_coords, pch=19, cex=0.6, add=T)
+
+isTRUE(all.equal(SG1_nb, SG2_nb, check.attributes = F))
+```
+
+For Singapore planning areas queen contiguity is the same as rook contiguity.
+
+### 2. k nearest neighbours
+
+```{r}
+(IDs = row.names(SG))
+SG3_nb = knn2nb(knearneigh(SG_coords, k = 1), row.names = IDs) # nearest neighbour
+SG4_nb = knn2nb(knearneigh(SG_coords, k = 2), row.names = IDs) # 2 nearest neighbours
+SG5_nb = knn2nb(knearneigh(SG_coords, k = 3), row.names = IDs) # 3 nearest neighbours
+```
+
+Note that metric distances may vary if st_centroid is used. Let us plot the k nearest neighbours on a map of Singapore.
+
+```{r}
+plot(st_geometry(SG), border="grey60", axes=T,  main="k=1")
+plot(SG3_nb, SG_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(SG), border="grey60", axes=T,  main="k=2")
+plot(SG4_nb, SG_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(SG), border="grey60", axes=T,  main="k=3")
+plot(SG5_nb, SG_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(SG), border="grey60", axes=T,  main="Compare: k=2 vs. k=3 (difference in red)")
+plot(SG5_nb, SG_coords, col="red", pch=19, cex=0.6, add=T) # plot the nb with more connections first.
+plot(SG4_nb, SG_coords, pch=19, cex=0.6, add=T)
+```
+
+The final plot shows the difference between the neghbourhood relationships when k=2 and k=3. 
+
+### 3. Distance based neighbours
+
+The following chunk create nb objects based on three distances and plots them.
+
+```{r}
+st_crs(SG)$units
+SG6_nb = dnearneigh(SG_coords, d1 = 0, d2 = 1000, row.names = IDs)
+SG7_nb = dnearneigh(SG_coords, d1 = 0, d2 = 5000, row.names = IDs)
+SG8_nb = dnearneigh(SG_coords, d1 = 0, d2 = 10000, row.names = IDs)
+
+plot(st_geometry(SG), border="grey60", axes=T,  main="Within 1km")
+plot(SG6_nb, SG_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(SG), border="grey60", axes=T,  main="Within 5km")
+plot(SG7_nb, SG_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(SG), border="grey60", axes=T,  main="Within 10km")
+plot(SG8_nb, SG_coords, pch=19, cex=0.6, add=T)
+```
+
+As can be seen from the plots, note that distance-based neighbours can leave some spatial units neighbour-less and the degree of connectedness can exponentially increase as you increase the distance. 
+
+## Create a weights list object from nb object
+
+The nb list object that we created before contains information on how areal units are related to one another. It must be converted to a weights matrix before it can be used in statistical analyses. We can do this by suing the function nb2listw(). This function converts the nb list to a weights list object that contains information about the type of the weights matrix to be used in the analysis. Example:
+
+```{r}
+(UK_lw = nb2listw(UK_nb)) # row normalised weights
+names(UK_lw)
+names(attributes(UK_lw))
+summary(unlist(UK_lw$weights))
+summary(sapply(UK_lw$weights, sum))
+```
+
+There are many style options (see ?nb2listw). The default is the row normalised form. Row standardising can turn a symmetric weights matrix into an asymmetric one. 
+There is also the chance of boosting the weights of the units near the boundary. 
+
+In many econometric applications it is the norm to use style=“W” matrix as it has the property of sum(W)=n which is quite useful in numerical optimisations and other computations related to estimation of parameters and test statistics. (See next chapter).
+
+By default, zero.policy=F, which means there cannot be “loners”. You can disable this by setting zer.policy=T but in many econometric applications such a W matrix raises more problems than can be answered, for example, the effective sample size, a.k.a degrees of freedom in tests model identification issues, etc. Example:
+
+```{r}
+# (SG1_lw = nb2listw(SG1_nb))
+# (SG1_lw = nb2listw(SG1_nb, zero.policy=T))
+# print(SG1_lw, zero.policy=T)
+```
+
+

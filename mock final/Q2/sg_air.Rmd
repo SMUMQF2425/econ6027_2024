@@ -1,0 +1,166 @@
+# Question 2: Geospatial Data (30 marks)
+
+Shared with you are two files:
+
+1. “sg_air.Rdata” contains various air quality indictors from 11 locations in Singapore.
+
+2. “sg_regions.geojson” contains the region boundaries of Singapore.
+
+Figure 2.1 shows the live map taken from https://www.iqair.com/ showing the Air Quality Index at 11 monitoring stations in Singapore on 2nd of November 2022. Three other Malaysian monitoring locations closer to Singapore border can also be seen on the map. “sg_air.Rdata” contains the dataset related to these observations. The main indicator is an attribute called US-AQI (click here to learn more about Air Quality Indices) which is an index computed using the usual pollutants such as ozone, nitrogen dioxide, sulphur dioxide, etc. Your task is to recreate the surface of the US-AQI using geospatial analysis methods.
+
+```{r}
+library(sf); library(tmap); library(gstat)
+tmap_options(show.warnings=F, show.messages=F)
+```
+
+Answer the following questions:
+
+a) Give spatial awareness to the “sg_air.Rdata” dataset. Prepare your dataset for analysis and give a basic plot of your dataset (5 marks)
+
+```{r}
+#############
+# Load data #
+#############
+
+sg_regions = st_read("sg_regions.geojson")
+table(st_is_valid(sg_regions))
+st_crs(sg_regions)$proj4string # not projected
+CRS = "+proj=tmerc +lat_0=1.366666666666667 +lon_0=103.8333333333333 +k=1 +x_0=28001.642 +y_0=38744.572 +datum=WGS84 +units=m +no_defs"
+sg_regions = st_transform(sg_regions, crs=CRS)
+st_is_longlat(sg_regions)
+(sg = st_union(sg_regions))
+
+load("sg_air.Rdata"); sg_air
+sg_air = st_as_sf(sg_air, coords=c("lon", "lat"), crs=4326)
+class(sg_air); st_crs(sg_air)$proj4string
+sg_air = st_transform(sg_air, crs=CRS)
+st_is_longlat((sg_air))
+
+tm_shape(sg_regions) + tm_polygons(col = "Region") + 
+  tm_shape(sg_air) + tm_bubbles() + 
+  tm_layout(main.title = "Air Quality Monitor Locations", legend.show = F)
+```
+
+b) Re-create the Voronoi Tessellation given in Figure 2.2. (5 marks)
+
+```{r}
+#######################
+# VORONOI TESSELATION #
+#######################
+
+sg_air_sp = as(sg_air,"Spatial")
+voro_sp = dismo::voronoi(sg_air_sp)
+(voro_sf = voro_sp %>% st_as_sf() %>% st_intersection(sg))
+(voro_plot = tm_shape(voro_sf) + tm_polygons(col="US_AQI", palette="YlOrRd", title="AQI") + 
+    tm_shape(sg_air) + tm_dots() + 
+    tm_layout(main.title='Voronoi Tesselation, AQI', legend.outside=T))
+```
+
+c) Reconstruct the surface using the inverse distance weighting method where the “idp=1” and “idp=3”. Your output must show the head of the interpolated estimates and plots of the estimates. Which idp is more appropriate? (5 marks)
+
+```{r}
+#####################
+# IDW INTERPOLATION #
+#####################
+
+(sg_grid = sg %>% st_sample(size=10000, type="regular") %>% st_set_crs(CRS))
+
+# idp = 1
+(idw1 = idw(US_AQI~1, locations=sg_air, newdata=sg_grid, idp = 1))
+(idw1_plot = tm_shape(idw1) + tm_symbols(col="var1.pred", palette="YlOrRd", size=0.05, shape=15) + 
+    tm_layout(legend.outside=T, title="AQI", main.title="AQI IDW1 estimate"))
+
+# idp = 3
+(idw3 = idw(US_AQI~1, locations=sg_air, newdata=sg_grid, idp = 3))
+(idw3_plot = tm_shape(idw3) + tm_symbols(col="var1.pred", palette="YlOrRd", size=0.05, shape=15) + 
+    tm_layout(legend.outside=T, title="AQI", main.title="AQI IDW3 estimate"))
+
+tmap_arrange(idw1_plot, idw3_plot, nrow=1)
+# idp=3 is better than idp=1 when comparing against the Voronoi tessellation
+```
+
+d) Use the autofitVariogram() function to find the most suitable parametric model fit for the empirical semi-variogram. Use this fitted model to predict the US-AQI using ordinary kriging method. Your final answer should include (5 marks):
+
+1. Plot of the fitted variogram.
+
+```{r}
+############################
+# SEMI-VARIOGRAM & KRIGING #
+############################
+
+# Autofit Variogram
+sg_air_sp = as(sg_air, "Spatial")
+(autovgm = automap::autofitVariogram(US_AQI~1, sg_air_sp)) 
+# Spherical model selected
+plot(autovgm)
+
+# Empirical variogram
+svgm = variogram(US_AQI~1, sg_air)
+plot(svgm, main="Empirical semi-variogram")
+
+(fvgm.s = fit.variogram(svgm, vgm(psill=500, model="Sph", range=5600, nugget=100), warn.if.neg=T))
+```
+
+2. Summary of the predictions.
+
+```{r}
+ok1 = krige(US_AQI~1, locations=sg_air, newdata=sg_grid, model=fvgm.s)
+summary(ok1) # no negative estimates, no problem!
+```
+
+3. Plot of the reconstructed US-AQI indicator over Singapore.
+
+```{r}
+ok1_plot = tm_shape(ok1) + tm_symbols(col="var1.pred", palette="YlOrRd", shape=15, size=0.05) + tm_layout(legend.outside=T, main.title="AQI OK1 estimate")
+```
+
+e) Compare the variogram fits using the models: spherical, wave, Matern and pentaspherical. (5 marks)
+
+```{r}
+# Since we used the spherical model in (d), we focus on alternative fits:
+(fvgm.w = fit.variogram(svgm, vgm(psill=500, model="Wav", range=5600, nugget=100), warn.if.neg=T))
+(fvgm.m = fit.variogram(svgm, vgm(psill=500, model="Mat", range=5600, nugget=100), warn.if.neg=T))
+(fvgm.p = fit.variogram(svgm, vgm(psill=500, model="Pen", range=5600, nugget=100), warn.if.neg=T))
+plot1 = plot(svgm, model=fvgm.s, main="Fitted semi-variogram, spherical model")
+plot2 = plot(svgm, model=fvgm.w, main="Fitted semi-variogram, wave model")
+plot3 = plot(svgm, model=fvgm.m, main="Fitted semi-variogram, Matern model")
+plot4 = plot(svgm, model=fvgm.p, main="Fitted semi-variogram, pentaspherical model")
+```
+
+1. Select the model fit that includes a “nugget effect”.
+
+```{r}
+gridExtra::grid.arrange(plot1, plot2, plot3, plot4, nrow = 2)
+# select "wave" model since all other models set nugget to be 0 which is highly unlikely in this case
+```
+
+2. Re-do the answers to part (d) using the new parametric fit.
+
+```{r}
+# Since we plotted a fitted variogram using the wave model in (e), we have already resolved (d) 1. We now focus on (d) 2. and 3. using the same wave model.
+
+# Prediction using the wave model
+ok2 = krige(US_AQI~1, locations=sg_air, newdata=sg_grid, model=fvgm.w)
+summary(ok2) # no negative estimates, no problem!
+ok2_plot = tm_shape(ok2) + tm_symbols(col="var1.pred", palette="YlOrRd", shape=15, size=0.05) + tm_layout(legend.outside=T, main.title="AQI OK2 estimate")
+```
+
+f) Compare the variances of the estimates in parts (d) and (e) and hence identify the best estimate. Your answer may include comparisons of maps, histograms, descriptive statistics, etc. (5 marks)
+
+```{r}
+# Wave model
+varok1_plot = tm_shape(ok1) + tm_symbols(col="var1.var", palette="Reds", shape=15, size=0.05) + tm_shape(sg_air) + tm_dots() + tm_layout(legend.outside=T, main.title="Variance of the OK1 estimate")
+tmap_arrange(ok1_plot, varok1_plot)
+
+# Spherical model
+varok2_plot = tm_shape(ok2) + tm_symbols(col="var1.var", palette="Reds", shape=15, size=0.05) + tm_shape(sg_air) + tm_dots() + tm_layout(legend.outside=T, main.title="Variance of the OK2 estimate")
+tmap_arrange(ok2_plot, varok2_plot)
+
+# Comparison
+tmap_arrange(varok1_plot, varok2_plot)
+par(mfrow=c(1,2))
+hist1 = hist(ok1$var1.var)
+hist2 = hist(ok2$var1.var)
+par(mfrow=c(1,1))
+# Spherical model gives less variable predictions and hence is better.
+```

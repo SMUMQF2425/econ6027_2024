@@ -1,0 +1,134 @@
+---
+title: "ECON6027_8a"
+author: "Dr. Liu"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# GEOSPATIAL ANALYSIS
+
+Load the required packages. Note that the "dismo" package loaded here is in need of an updated to work with the lates spatial object styles. Alternative more up to date packages exists, however, are more generic and less compatible with spatial objects.
+
+```{r}
+library(gstat)
+library(dismo); library(sf); library(tmap)
+```
+
+## Dataset
+
+Airborne counts of Fulmaris glacialis during the Aug/Sept 1998 and 1999 flights on the Dutch (Netherlands) part of the North Sea
+
+```{r}
+data(fulmar); head(fulmar)
+```
+
+We will create a Voronoi tessellation for the spatial points df to provide NN interpolations: see <https://en.wikipedia.org/wiki/Voronoi_diagram> for more details. Convert to sf and assign CRS UTM Zone 31N
+
+```{r}
+fulmar_sf = st_as_sf(fulmar, coords=c("x","y"), crs=32631) # UTM Zone 31N
+```
+
+Extract the data for year 1999 and plot.
+
+```{r}
+fulmar99 = fulmar_sf[fulmar$year==1999, ]
+tm_shape(fulmar99) + 
+  tm_symbols(col="fulmar", palette="Accent", shape=20, size=0.2) + 
+  tm_layout(legend.outside="T", main.title = "Fulmar Sightings, 1999")
+```
+
+## Nearest Neighbour Interpolation
+
+At the moment, dismo only works on sp objects. Hence, we convert the sf to sp which can be done easily as there is smooth transition between the two.
+
+```{r}
+fulmar99_sp = as(fulmar99, "Spatial") # voronoi function needs "SpatialPoints"
+```
+
+Create Voronoi Tesselation:
+
+```{r}
+voro = voronoi(fulmar99_sp, ext=st_bbox(fulmar99))
+class(voro) # output is a sp polygon object
+```
+
+Visualise the Voronoi Tesselation:
+
+```{r}
+(voro_sf = st_as_sf(voro, crs=32631))
+tm_shape(voro_sf) + 
+  tm_polygons(col="fulmar", palette="Accent") + 
+  tm_layout(legend.outside="T", main.title = "Fulmar Sightings, 1999")
+```
+
+### Observations and characteristics of a Voronoi map
+
+-   Areas of the polygons vary with the density of points (for internal points) and edge points have polygons of infinite area (trimmed to an enclosing rectangle). These edge polygons somewhat dominate the interpolations visually.
+
+-   Increase in density of the sightings towards NE direction discontinuous nature of the interpolated surfaces which creates a distorting effect of the variety of shapes and sizes. Thus, it is harder to identify a subtler pattern.
+
+-   Interpolated surfaces are discontinuous which not usual for geospatial data in general.
+
+### Other ways of creating Voronoi maps in R
+
+In the chunks above, we have used the "dismo" package. The advantage of the dismo package is that it accepts "sp" objects and the output is also a "sp" object. However, an update is in order to admit "sf" objects. Other methods include:
+
+-   "[deldir](https://r-charts.com/part-whole/voronoi-diagram/)" function in the package "deldir". This is a very old package (1995/96) that has withstood the test of time! The input needs to be in coordinates and the output is a list object of class "deldir". I did not use this here to avoid the need for additional manipulation to convert a "deldir" object to "sf".
+
+-   "[voronoi](https://rdrr.io/cran/terra/man/voronoi.html)" function in the package "terra". The package requires the spatial object to belong to the raster class "SpatVector".
+
+-   Plot with "ggplot2" using the partner package "[ggvoronoi](https://r-charts.com/part-whole/ggvoronoi/)". If you are familiar with the ggplot grammar, you are welcome to try the functionality in this package.
+
+## Inverse Distance Weighting interpolation
+
+Inverse distance weighting (IWD) is a deterministic interpolation technique that estimates the values of the unsampled points according to the values at nearby locations weighted only by distance. IWD assumes that the relationship between nearby location and interpolation location is stronger compared to locations that are farther. Thus, it has the advantage of not relying only on the nearest observation unlike NN interpolation. IWD provides an easier way to predict values of continuous variables, however it is not sensitive to areas of peaks or pits and thus lead to undesirable results.
+
+- idw function in "gstat" package works with sp/sf objects (a CRS must be set).
+
+- idw function needs a set of unsampled locations to be interpolated.
+
+```{r}
+data(ncp.grid) # if no unsampled set is present, you need to create one based on the region polygon.
+```
+
+Inspect the set of unsampled points.
+
+```{r}
+class(ncp.grid) # not a spatial object
+(ncp.gridsf = st_as_sf(ncp.grid, coords=c("x","y"), crs=32631))
+```
+
+IDW estimate:
+
+```{r}
+(fulmar_idw1 = gstat::idw(formula=fulmar~1, locations=fulmar99, 
+                          newdata=ncp.gridsf, idp = 1)) # inverse
+(fulmar_idw2 = gstat::idw(formula=fulmar~1, locations=fulmar99, 
+                          newdata=ncp.gridsf, idp = 2)) # inverse square
+```
+
+Basic plots of var1.pred (variable 1: prediction)
+
+```{r}
+plot(fulmar_idw1["var1.pred"], main="Fulmar density estimation, idp=1")
+plot(fulmar_idw2["var1.pred"], main="Fulmar density estimation, idp=2")
+```
+
+We can also use tmap.
+
+```{r}
+idw_map1 = tm_shape(fulmar_idw1) + 
+  tm_dots(col="var1.pred", palette="YlGnBu", size=0.2, title="Fulmar density estimation, idp=1") +
+  tm_layout(title="Fulmar density estimation, idp=1")
+idw_map2 = tm_shape(fulmar_idw2) + 
+  tm_dots(col="var1.pred", breaks=c(0,1,2,3,4,5,6,Inf), palette="YlGnBu", size=0.2, title="Fulmar density estimation, idp=2") + 
+  tm_layout(title="Fulmar density estimation, idp=2")
+tmap_arrange(idw_map1, idw_map2)
+```
+
+

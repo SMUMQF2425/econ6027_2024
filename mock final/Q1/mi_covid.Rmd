@@ -1,0 +1,174 @@
+# Question 1: Areal Data (40 marks)
+
+Shared with you are two files:
+
+1. “covid.Rdata” gives various covid related observations aggregated at county level in Michigan taken from New York Times. The variables are:
+
+i. TOT_CASES: total cases
+
+ii. CASES_100K: cases per 100,000 population
+
+iii. TOT_DEATHS: total deaths
+
+iv. DEATHS_100K: deaths per 100,000 population
+
+v. PCT_VACC: vaccination take-up rate.
+
+2. “mi_county” shapefile for the boundaries. Michigan is the only state to consist of two peninsulas. The Lower Peninsula is shaped like a mitten. The Upper Peninsula (often called "the U.P.") is separated from the Lower Peninsula by the Straits of Mackinac, a five-mile (8 km) channel that joins Lake Huron to Lake Michigan.
+
+```{r}
+library(sf); library(tmap); library(spdep); library(spatialreg)
+```
+
+Answer the following questions:
+
+a) Load the Michigan county shapefile and give a “nb” connectivity plot based on the queen contiguity criterion. (4 marks)
+
+```{r}
+#####################
+# Michigan counties #
+#####################
+
+(mi_county = st_read("mi_county.shp"))
+table(st_is_valid(mi_county))
+tm_shape(mi_county) + tm_polygons() + tm_layout(main.title="Michigan, USA")
+```
+
+b) Notice that the “nb” object does not connect the counties “Mackinac” and “Emmet”. Make this connection. Your final “nb” object to be used in this question should be as given in Figure 1.1. This plot must be given along with the summary of the “nb” object. (4 marks)
+
+```{r}
+####################
+# Queen contiguity #
+####################
+
+(mi_nb = poly2nb(mi_county))
+mi_coords = st_point_on_surface(st_geometry(mi_county))
+plot(st_geometry(mi_county), border="grey60", axes=T,  main="Queen Contiguity")
+plot(mi_nb, mi_coords, pch=19, cex=0.6, add=T)
+
+# write.nb.gal(mi_nb, "mi_nb.gal", oldstyle=F)
+(mi_nb_new = read.gal("mi_nb_new.gal"))
+plot(st_geometry(mi_county), border="grey60", axes=T,  main="Queen Contiguity with the coerced connection in Red")
+plot(mi_nb_new, mi_coords, pch=19, cex=0.6, col="red", add=T)
+plot(mi_nb, mi_coords, pch=19, cex=0.6, add=T)
+```
+
+c) Load the “covid.Rdata” file and give it spatial awareness using the Michigan county shapefile. (Hint: You will need to manipulate the “by” argument when mutating joins.) (4 marks)
+
+```{r}
+########################################
+# Give spatial awareness to covid data #
+########################################
+
+load("covid.Rdata")
+head(covid)
+(mi_covid = dplyr::inner_join(mi_county, covid, by=c("NAME"="COUNTY")))
+```
+
+d) Using a Moran’s I statistic, give a comparison of the spatial autocorrelation of the variables “CASES_100K” and “DEATHS_100K” in each county. (4 marks)
+
+```{r}
+#############
+# Moran's I #
+#############
+
+(mi_lw = nb2listw(mi_nb_new))
+moran.test(mi_covid$CASES_100K, listw=mi_lw)
+moran.test(mi_covid$DEATHS_100K, listw=mi_lw)
+# Both Moran's I statistics are highly significant at 5% level.
+# The death per 100k has a stronger spatial association compared to the cases per 100k.
+```
+
+e) Construct an appropriate plot to identify any significant local cluster(s) of counties with strong spatial spill-over effects in the “TOT_CASES” . What is the geographic/economic significance of the cluster(s) you observe? (4 marks)
+
+```{r}
+###################
+# Local Moran's I #
+###################
+
+localm = localmoran(mi_covid$TOT_CASES, listw=mi_lw)
+head(localm)
+mi_covid$LMORANZ = localm[,4]
+tm_shape(mi_covid) + tm_polygons(col="LMORANZ")
+# There is a significant cluster of counties with high spatial autocorrelation in the number of the cases in the SE of Michigan.
+# From a geographic/economic point of view, the cluster seems to surround Wayne county where Detroit is situated.
+# Detroit is the largest and most populous city in the U.S. state of Michigan.
+```
+
+f) How many spatial outliers are there for the variable “TOT_DEATHS” per county? (4 marks)
+
+```{r}
+##############
+# Moran plot #
+##############
+
+moran_plot = moran.plot(mi_covid$TOT_DEATHS, listw=mi_lw, main="Moran scatterplot", labels=F)
+summary(moran_plot)
+library(dplyr)
+(high_low = moran_plot %>% filter(x > 293.6) %>% filter(wx < 294))
+(low_high = moran_plot %>% filter(x < 293.6) %>% filter(wx > 294))
+# 14 spatial outliers altogether.
+```
+
+g) What is the most suitable lag order for the variable “DEATHS_100K”? (4 marks)
+
+```{r}
+###############
+# Correlogram #
+###############
+
+correl = sp.correlogram(mi_nb_new, mi_covid$DEATHS_100K, order=3, method="corr", style="W")
+correlI = sp.correlogram(mi_nb_new, mi_covid$DEATHS_100K, order=3, method="I", style="W")
+par(mfrow=c(1,2))
+plot(correl, main="Contiguity lag orders: correlation")
+plot(correlI, main="Contiguity lag orders: Moran's I")
+par(mfrow=c(1,1))
+# The most suitable lag order for "DEATHS_100K" seems to be 2.
+```
+
+h) Suppose you wish to regress the variable “DEATHS_100K” on “PCT_VACC”.
+
+1. Justify the use of spatial regression models in this case. (4 marks)
+
+```{r}
+##############
+# Regression #
+##############
+
+# simple linear model
+ols = lm(DEATHS_100K~PCT_VACC, mi_covid); summary(ols)
+lm.morantest(ols, mi_lw)
+# Reject the null of no spatial autocorrelation in the errors at 5% level
+# As seen before "DEATHS_100K" also has a highly significant positive Moran's I statistic. 
+# Therefore spatial models needs to be considered.
+```
+
+2. Compare suitable (spatial) regression models and identify the most suitable model. Use a 5% level of significance in the tests. (4 marks)
+
+```{r}
+# spatial autoregressive models
+sar = spautolm(DEATHS_100K~1, mi_covid, mi_lw); summary(sar)
+slm = lagsarlm(DEATHS_100K~PCT_VACC, mi_covid, mi_lw); summary(slm)
+sem = errorsarlm(DEATHS_100K~PCT_VACC, mi_covid, mi_lw); summary(sem)
+sarar = sacsarlm(DEATHS_100K~PCT_VACC, mi_covid, mi_lw); summary(sarar)
+
+AIC(ols); AIC(sar); AIC(slm); AIC(sem); AIC(sarar)
+BIC(ols); BIC(sar); BIC(slm); BIC(sem); BIC(sarar)
+
+# Based on AIC and BIC, SARAR model is better.
+
+LR.Sarlm(sarar, sar) # reject SAR
+LR.Sarlm(sarar, slm) # reject SLM
+LR.Sarlm(sarar, sem) # reject SEM
+LR.Sarlm(sarar, ols) # reject OLS
+# SARAR model is superior
+```
+
+i) Figure 1.2 gives a screen grab of an interactive map as given in The New York Times (it is still there!). Re-create a similar interactive map. (A legend is not required.) (4 marks)
+
+```{r}
+# interactive map
+tmap_mode("view")
+tot_cases = st_as_sf(data.frame(mi_covid$TOT_CASES), mi_coords)
+tm_shape(mi_county) + tm_polygons(alpha=0.1, border.col = "white") + tm_shape(tot_cases) + tm_bubbles(size="mi_covid.TOT_CASES", col="red", alpha=0.3, scale=3)
+```

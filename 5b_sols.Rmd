@@ -1,0 +1,36 @@
+
+```{r}
+################
+# 5b Solutions #
+################
+
+library(spatstat)
+
+data(bramblecanes)
+table(duplicated(bramblecanes)) # no duplicates
+class(bramblecanes); bramblecanes; plot(bramblecanes)
+
+(quad.test = quadrat.test(bramblecanes, nx=9, ny=9))
+# Reject the null of qc~Po(lambda) at 5% level.
+
+# Estimate lambda (under null)
+# View(quad.test) # inspect the quad.test list object.
+quad.test$observed # gives the observed number of points in each quadrat
+quad.test$parameter # gives the number of df (i.e. n=df+1)
+n = quad.test$parameter+1
+
+# Average number of points per quadrat
+(lambda = sum(quad.test$observed)/n)
+
+# Null vs. observed distribution of counts (optional)
+(observed = table(quad.test$observed))
+(max.num = max(quad.test$observed)) # maximum number of observations in a single quadrat
+(max.freq = max(observed)) # maximum frequency
+plot(c(0,max.num),c(0,max.freq), type="n", 
+     xlab="Number of incidents per quadrat (Red=Observed, Blue=Expected)", 
+     ylab="Frequency of Occurances", main="Quadrat counts: Observed vs Expected")
+points(dpois(0:max.num, lambda=lambda)*n, type="l", col="Blue", lwd=2)
+points(observed, col="Red", type="l", lwd=2)
+# Clearly the point pattern does not follow a HPP.
+```
+

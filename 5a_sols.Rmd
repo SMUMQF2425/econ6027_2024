@@ -1,0 +1,69 @@
+
+```{r}
+################
+# 5a Solutions #
+################
+
+library(spatstat); library(sf)
+
+# Point data
+SLC = st_read("SPF_PSLC.shp")
+SLC$TYPE = "Laser"
+MSC = st_read("SPF_MSC.shp")
+MSC$TYPE = "Mobile"
+FSC = st_read("SPF_FSC.shp")
+FSC$TYPE = "Fixed"
+(speed_cameras = rbind(SLC, MSC, FSC)) # combine
+st_crs(speed_cameras)$proj # tmerc is projected
+
+# ppp
+(speed.cam = as.ppp(speed_cameras)) # (speed.cam = as.ppp(st_geometry(speed_cameras)))
+
+# Boundary
+sg_regions = st_read("MP14_PLNG_AREA_WEB_PL.shp") # sg regions
+sg_regions = st_make_valid(sg_regions); table(st_is_valid(sg_regions))
+isTRUE(all.equal(st_crs(sg_regions), st_crs(speed_cameras)))
+sg = st_union(sg_regions)
+
+# owin
+(sg.owin = as.owin(sg))
+Window(speed.cam) = sg.owin
+speed.cam
+plot(speed.cam)
+
+# re-assign marks
+marks(speed.cam) = as.factor(speed_cameras$TYPE) # categorical marks must be given as factor.
+plot(speed.cam)
+
+################################################################################
+
+## Alternative approach
+XY = st_coordinates(speed_cameras)
+(speed.cam2 = ppp(XY[,1], XY[,2], window = sg.owin,
+                 marks = as.factor(speed_cameras$TYPE)))
+plot(speed.cam2)
+duplicated(speed.cam2)
+
+# What to do about duplicated entries?
+
+# 1. Discard duplicated points
+(speed.cam3 = unique(speed.cam2))
+plot(speed.cam3)
+
+# 2. Perturb coordinates slightly
+(speed.cam4 = rjitter(speed.cam2, retry=T))
+plot(speed.cam4)
+
+# 3. Make the points of the pattern unique and attach the multiplicities of the points to the pattern as marks.
+marks(speed.cam2) = data.frame(type=marks(speed.cam2), mul=multiplicity(speed.cam2))
+(speed.cam5 = unique(speed.cam2))
+plot(speed.cam5)
+
+par(mfrow=c(2,2))
+plot(speed.cam2)
+plot(speed.cam3)
+plot(speed.cam4)
+plot(speed.cam5)
+par(mfrow=c(1,1))
+```
+

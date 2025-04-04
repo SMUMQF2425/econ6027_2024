@@ -1,0 +1,56 @@
+
+```{r}
+################
+# 2a Solutions #
+################
+
+library(spData); library(sf)
+
+# Exercise A
+
+nz
+plot(nz["Name"], main="Regions of New Zealand",  key.pos=NULL)
+st_crs(nz)$units_gdal
+nz_simp = st_simplify(nz, dTolerance = 20000) 
+object.size(nz)
+plot(nz_simp["Name"], main="Simplified Regions of NZ", pal=rainbow(16), key.pos=NULL)
+
+# Exercise B
+nz_pos = st_point_on_surface(nz)
+plot(nz["Name"], main="NZ center points", reset=F, col="white")
+plot(nz_pos["geom"], add=T, col="red")
+
+# Exercise C
+
+# 1
+seine_buff = st_buffer(seine, dist = 50000) # 50km buffer
+x = seine_buff[1,]
+y = seine_buff[2,]
+z = seine_buff[3,]
+# use: st_intersect()
+
+# 2
+par(mfrow=c(1,2))
+seine_union = st_union(seine_buff)
+plot(seine_union, main="st_union")
+
+# 3
+seine_combine = st_combine(seine_buff)
+plot(seine_combine, main="st_combine")
+# st_combine combines geometries without resolving borders whereas st_union resolves all borders to give a single polygon.
+par(mfrow=c(1,1))
+class(seine_union);  class(seine_combine)
+
+# 4
+XnotZ = st_difference(x,z)
+plot(seine_combine, main="Marne but not Yonne", reset=F)
+plot(XnotZ["name"], col="red", add=T)
+
+# Exercise D
+nz_union = st_union(nz) # can you explain why this step is important? 
+# It will resolve the internal borders
+nz_buff = st_buffer(nz_union, dist=22000)
+plot(nz_buff,col="blue", main="NZ with territorial sea", reset=F)
+plot(nz["Name"], col="white", add=T)
+```
+

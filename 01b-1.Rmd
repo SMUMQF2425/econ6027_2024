@@ -1,0 +1,25 @@
+
+```{r}
+knitr::opts_chunk$set(echo = TRUE)
+
+is.element('sf', installed.packages())
+library(sf)
+
+sg_pa = st_read("MP14_SUBZONE_WEB_PL.shp") 
+
+class(sg_pa)
+summary(sg_pa)
+head(sg_pa)
+table(st_is_valid(sg_pa))
+
+sg_pa = st_make_valid(sg_pa)
+table(st_is_valid(sg_pa))
+
+plot(sg_pa, max.plot = 12)
+plot(sg_pa["PLN_AREA_N"])
+
+st_write(sg_pa, "MySingapura.shp", delete_layer=T) 
+
+#st_write(sg_pa, "MySingapura.geojson")
+```
+

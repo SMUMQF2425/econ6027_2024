@@ -1,0 +1,87 @@
+
+```{r}
+################
+# 4b Solutions #
+################
+
+library(aspace, quietly = T); library(sf); library(tmap)
+
+## From the notes
+
+sg_regions = st_read("MP14_PLNG_AREA_WEB_PL.shp") # sg regions
+sg_regions = st_make_valid(sg_regions); table(st_is_valid(sg_regions))
+
+SLC = st_read("SPF_PSLC.shp") # speed laser cameras
+
+# EXERCISE A solutions
+
+# use rbind() to combine rows of three sf objects
+
+# Load and re-name
+SLC = st_read("SPF_PSLC.shp")
+SLC$TYPE = "Laser"
+MSC = st_read("SPF_MSC.shp")
+MSC$TYPE = "Mobile"
+FSC = st_read("SPF_FSC.shp")
+FSC$TYPE = "Fixed"
+
+# Combine and plot
+(speed_cameras = rbind(SLC, MSC, FSC))
+(sg_map = tm_shape(sg_regions) + 
+    tm_polygons(col="REGION_N", alpha=0.5, border.col = "grey", palette="Set2", 
+                legend.show = F))
+(camera_locations = sg_map + tm_shape(speed_cameras) + 
+    tm_dots(col="TYPE", palette=c("red","black","blue"), size=0.1) + 
+    tm_layout(title="Locations of Speed Cameras, Singapore", inner.margins = 0.1))
+
+# Notice that laser cameras are along the east-west direction whereas the fixed cameras are in the northeast-southwest direction. 
+# You may separate the analysis of these two different types and compare. 
+# Plot the resulting standard deviational ellipses on an interactive Singapore map to see whether these cameras are along any specific expressways (PIE, CTE, etc.) in particular.
+
+################################################################################
+
+# From the notes
+dengue = st_read("dengue-clusters-may20.geojson") # original CRS is WGS84
+dengue = st_transform(dengue, crs=st_crs(sg_regions)) # align the CRS
+dengue = st_make_valid(dengue)
+dengue$area = st_area(dengue)
+dengue_spots = st_centroid(dengue)
+dengue_coords = st_coordinates(dengue_spots)
+dengue_area = st_area(dengue)
+dengue_area = units::drop_units(st_area(dengue))
+dengue_map = sg_map + tm_shape(dengue_spots) + tm_dots() +
+  tm_layout(main.title="Locations of High Dengue Incidence, May 2020, Singapore", 
+            inner.margins = 0.1)
+
+# EXERCISE B Solutions
+
+mean = calc_mnc(id=1, weighted = T, weights=dengue_area, points = dengue_coords)
+sdd = calc_sdd(id=2, calccentre = T, weighted = T, weights = dengue_area, 
+               points = dengue_coords)
+sde = calc_sde(id=3, calccentre = T, weighted = T, weights = dengue_area, 
+               points = dengue_coords)
+
+dengue_mean = mean$LOCATIONS %>% data.frame() %>% st_as_sf(coords = c("x", "y"), 
+                                                    crs=st_crs(sg_regions))
+dengue_mean$id = "Weighted mean"
+
+(dengue_sdd = sdd$LOCATIONS%>% st_as_sf(coords = c("x", "y"), crs=st_crs(sg_regions)) %>% 
+    st_combine() %>% st_cast("LINESTRING"))
+(dengue_sdd = st_sf(sdd$ATTRIBUTES, geom=st_geometry(dengue_sdd)))
+
+(dengue_sde = sde$LOCATIONS %>% st_as_sf(coords = c("x", "y"), crs=st_crs(sg_regions)) %>% 
+    st_combine() %>% st_cast("LINESTRING"))
+(dengue_sde = st_sf(sde$ATTRIBUTES, geom=st_geometry(dengue_sde)))
+
+dengue_map + 
+  tm_shape(dengue_mean) + tm_dots(shape="id",col="red",size=0.1,
+                                  title.shape="Weighted Measures") + 
+  tm_shape(dengue_sde) + tm_lines(lwd=2) + 
+  tm_shape(dengue_sdd) + tm_lines(lwd=2,lty=2) + 
+  tm_add_legend(type = "line", labels = "Weighted SDD", lty=2) + 
+  tm_add_legend(type = "line", labels = "Weighted SDE", lty=1) + 
+  tm_compass(type = "4star",position=c("right","top"), size=0.5) + 
+  tm_scale_bar(position = c("right","bottom")) + 
+  tm_layout(legend.outside = T)
+```
+

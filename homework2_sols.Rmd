@@ -1,0 +1,180 @@
+# ECON6027: Assignment 2 (50 marks)
+
+For this homework, use the Columbus, OH crime dataset introduced by Luc Anselin. This is one of the celebrated pioneering datasets, that justified the use of spatial regression models to the literature.
+
+Submission: html output and R code
+
+```{r}
+library(spdep); library(spatialreg); library(sf); library(tmap)
+```
+
+To load the dataset (and gal file) directly, run:
+
+`data(columbus, package="spData")`
+
+To load the shapefile (useful for maps), run:
+
+```{r}
+columbus = st_read(system.file("shapes/columbus.shp", package="spData"))
+```
+
+To load the gal file, run:
+
+```{r}
+col.gal.nb = read.gal(system.file("weights/columbus.gal", package="spData"))
+```
+
+##### When conducting model selection, it is better to have more than one line of arguments supporting your decision (AIC, BIC, R-square, tests, etc.)
+
+a) OLS1: Fit the variable CRIME on HOVAL, INC, OPEN, PLUMB, and DISCBD. Report the summary. (2 marks)
+
+##### Main variables:
+
+- HOVAL: housing value (in $1,000)
+
+- INC: household income (in $1,000)
+
+- CRIME: residential burglaries and vehicle thefts per 1000 households
+
+- OPEN: open space (area)
+
+- PLUMB: percent housing units without plumbing
+
+- DISCBD: distance to CBD
+
+```{r}
+ols1 = lm(CRIME ~ HOVAL+INC+OPEN+PLUMB+DISCBD, data = columbus)
+summary(ols1)
+```
+
+b) OLS2: (nested): Fit the variable CRIME only on HOVAL and INC. Report the summary. (2 marks)
+
+```{r}
+ols2 = lm(CRIME ~ HOVAL+INC, data = columbus)
+summary(ols2)
+```
+
+c) Determine which model is a better fit for CRIME. Explain. (3 marks)
+
+```{r}
+AIC(ols1); AIC(ols2)
+BIC(ols1); BIC(ols2)
+# Based on AIC and adjusted $R$-square, OLS1 is a better fit for CRIME.
+# However, the individual $t$-stats for variables PLUMB and OPEN are not significant suggesting the appropriateness of the nested model overall.
+```
+
+d) At 5% level of significance, test whether the nested model (OLS2) suffers from non-normality of errors and heteroskedasticity of errors. (4 marks)
+
+```{r}
+lmtest::bptest(ols2)
+# Reject the null of homoskedasticity.
+# Evidence of heteroskedasticity at 5% level.
+
+tseries::jarque.bera.test(ols2$residuals)
+# Do not reject the null of normality.
+# No evidence of non-normality of residuals at 5% level.
+```
+
+e) Plot the CRIME, HOVAL and INC values on three different maps of Columbus. What spatial relationships do you observe? (6 marks)
+
+```{r}
+crime_map = tm_shape(columbus) + tm_polygons(col="CRIME")
+hoval_map = tm_shape(columbus) + tm_polygons(col="HOVAL", palette="Blues")
+inc_map = tm_shape(columbus) + tm_polygons(col="INC", palette="Greens")
+tmap_arrange(crime_map, hoval_map, inc_map)
+# There is a clear spatial concentration of CRIME in the central region of Columbus.
+# Spatial concentration of the other two variables are less clear. 
+# However, notice how similar coloured polygons seem to gather together suggesting positive spatial autocorrelation. 
+# In particular, HOVAL and INC seem to be higher in the North, East and South East regions.
+```
+
+f) Conduct Moran’s tests on the variables in the nested model (OLS2) to detect any spatial autocorrelation. Report your conclusions at 5% level of significance. (6 marks)
+
+```{r}
+wlist = nb2listw(col.gal.nb, style="W")
+moran.test(columbus$CRIME, wlist)
+moran.test(columbus$HOVAL, wlist)
+moran.test(columbus$INC, wlist)
+# Reject the null of no spatial autocorrelation in all three variables at 5% level.
+# All variables display significant spatial spillover effects at 5% level.
+```
+
+g) Are there any “residual” spill-over effects in the nested model? (2 marks)
+
+```{r}
+lm.morantest(ols2, wlist)
+# Reject the null of no spatial autocorrelation in the OLS2 residuals.
+# Evidence of significant spatial autocorrelation in the residuals of model 2 and the dependent variable at 5% level.
+```
+
+h) Fit CRIME on the usual spatial regression models and report your results. (4 marks)
+
+```{r}
+sar = spautolm(CRIME ~ 1, columbus, wlist)
+slm = lagsarlm(CRIME ~ HOVAL+INC, columbus, wlist)
+sem = errorsarlm(CRIME ~ HOVAL+INC, columbus, wlist) 
+sarar = sacsarlm(CRIME ~ HOVAL+INC, columbus, wlist)
+
+summary(sar)
+summary(slm)
+summary(sem)
+summary(sarar)
+```
+
+i) Use the LM test to determine whether the SLM model or the SEM model is a better fit for the data. (4 marks)
+
+```{r}
+lm.LMtests(ols2, listw=wlist, test="RLMerr")
+lm.LMtests(ols2, listw=wlist, test="RLMlag")
+# Both non-robust tests are significant at 5% level.
+# However, both robust tests are not significant at 5% level.
+# Comparison of the p-values suggests the SLM is more likely.
+```
+
+j) Use the likelihood ratio test to determine whether:
+
+1. SARAR(1,1) model is superior to SLM or SEM (4 marks)
+
+```{r}
+LR.Sarlm(sem,sarar) # SEM vs SARAR
+LR.Sarlm(slm,sarar) # SLM vs SARAR
+# SARAR model is rejected in both tests in favour of SEM and SLM
+```
+
+2. SLM model is superior to SAR. (2 marks)
+
+```{r}
+LR.Sarlm(sar,slm) # SAR vs SLM
+# SAR model is rejected in favour of the SLM model.
+```
+
+k) Combine the results of (i) and (j) and any other diagnostics and identify the most suitable spatial model. (3 marks)
+
+```{r}
+# Based on the LR tests, the SEM or the SLM is better.
+# Robust LM test are somewhat inconclusive although the SLM model has the advantage w.r.t. the p-value.
+
+AIC(slm); AIC(sem)
+# Further, the AIC for the SLM is smaller compared to the AIC for the SEM suggesting the superiority of the SLM.
+# Therefore, overall the SLM is the better option.
+```
+
+l) Compare the model selected in (k) to the nested linear model (OLS2) and determine whether the spatial specification is superior to the usual linear regression specification for this dataset. (3 marks)
+
+```{r}
+LR1.Sarlm(slm)
+# Reject the nested model (OLS2) in favour of the SLM specification at 5% level.
+# Furthermore, the AIC of the SLM (376.34) is smaller compared to the AIC of OLS2 (382.75), suggesting that the SLM specification is better.
+```
+
+m) Determine whether a higher lag order is more suitable for the model selected in (k). (5 marks)
+
+```{r}
+correl = sp.correlogram(neighbours=col.gal.nb, var=columbus$CRIME, order=3, method="corr", style="W")
+correlI = sp.correlogram(neighbours=col.gal.nb, var=columbus$CRIME, order=3, method="I", style="W")
+par(mfrow=c(1,2))
+plot(correl, main="Contiguity lag orders: correlation")
+plot(correlI, main="Contiguity lag orders: Moran's I")
+par(mfrow=c(1,1))
+# Based on spatial autocorrelation and Moran's I confidence intervals, a lag order of 2 seems to be appropriate.
+```

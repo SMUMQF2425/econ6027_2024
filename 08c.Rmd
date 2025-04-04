@@ -1,0 +1,86 @@
+
+```{r}
+#############################
+# OZONE LAYER INTERPOLATION #
+#############################
+
+library(gstat); library(sf); library(tmap)
+
+# Load data
+ozone_sf = st_read("ca_ozone_pts.shp")
+CA_sf = st_read("ca_outline.shp")
+isTRUE(all.equal(st_crs(ozone_sf), st_crs(CA_sf)))
+st_crs(ozone_sf)$proj; st_crs(CA_sf)$proj
+# The two CRSs are aligned, good to go!
+
+st_is_valid(CA_sf); table(st_is_valid(ozone_sf)) # geometries are valid
+
+
+# 1. NEAREST NEIGHBOUR INTERPOLATION
+
+ozone_sp = as(ozone_sf,"Spatial")
+voro_sp = dismo::voronoi(ozone_sp, ext=st_bbox(CA_sf))
+
+# Mask the Voronoi Tesselation using the CA polygon
+(voro_sf = voro_sp %>% st_as_sf(crs=st_crs(ozone_sf)) %>% st_intersection(CA_sf))
+
+# plot
+(voro_plot = tm_shape(voro_sf) + 
+    tm_polygons(col="OZONE", title="O3 density, ppm", palette="YlGnBu") + 
+    tm_layout(main.title='O3 NNI estimate'))
+# There seem to be positive spatial autocorrelation in the Ozone layer!
+
+
+# 2. IDW INTERPOLATION
+
+# Create a grid of 100000 unsampled points (you may adjust this number)
+(ca_grid = st_sample(CA_sf, size=100000, type="regular"))
+
+(ozone_idw = idw(formula=OZONE~1, locations=ozone_sf, newdata=ca_grid, idp = 2))
+# Alternatively…
+# (ozone_idwk = krige(formula=OZONE~1, locations=ozone_sf, newdata=ca_grid)) # variogram not specified
+# isTRUE(all.equal(ozone_idw$var1.pred, ozone_idwk$var1.pred))
+
+# plot
+(idw_plot = tm_shape(ozone_idw) + 
+    tm_dots(col="var1.pred", title="O3 density, ppm", palette="YlGnBu", size=0.02, shape=15) + 
+    tm_layout(main.title="O3 IDW estimate"))
+
+# If the execution is too slow, try the following:
+# - Reduce the number of unsampled points
+# - The resulting loss of resolution can be compensated by increasing the dot size.
+
+# 3. KRIGING
+
+# Fit the variogram
+(autovgm = automap::autofitVariogram(OZONE~1, ozone_sp)) # check autofit first
+# Pick "Stein" model
+svgm = variogram(OZONE~1, ozone_sf) # empirical variogram
+options(scipen = 999)
+plot(svgm, main="Empirical semi-variogram") # make initial guesses here or use autofit estimates
+(fvgm = fit.variogram(svgm, vgm(psill=0.0004, model="Ste", range=200000, nugget=0.0001), warn.if.neg=T))
+plot(svgm, model=fvgm, main="Fitted semi-variogram, Stein's model") # trial and error other parametric models here.
+
+# ordinary kriging
+ozone_ok = krige(formula=OZONE~1, locations=ozone_sf, newdata=ca_grid, model=fvgm)
+summary(ozone_ok) # no negative densities, no problem!
+
+# plot
+# In the chunk below we create small squares to represent the predicted value.
+ok_plot = tm_shape(ozone_ok) + 
+  tm_dots(col="var1.pred", title="O3 density, ppm", palette="YlGnBu", shape=15, size=0.05, breaks=seq(0.04,0.18,0.02)) + 
+  tm_layout(main.title="O3 OK estimate")
+varok_plot = tm_shape(ozone_ok) + 
+  tm_dots(col="var1.var", title="Prediction Variance", palette="Reds", shape=15, size=0.05) + 
+  tm_shape(ozone_sf) + 
+  tm_dots() + 
+  tm_layout(main.title="Variance of the OK estimate")
+tmap_arrange(ok_plot, varok_plot)
+
+# ESTIMATE COMPARISON
+tmap_arrange(ok_plot, idw_plot, voro_plot)
+
+# Notice how the OK estimate is the closest to NNI estimate when compared to the IDW estimate. 
+# IDW estimate over-estimates the ozone layer, in particular, over the Eastern region.
+```
+

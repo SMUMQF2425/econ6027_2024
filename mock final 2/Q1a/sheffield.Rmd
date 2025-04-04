@@ -1,0 +1,214 @@
+# Question 1A: Areal Data (20 marks)
+
+Shared with you are two files:
+
+1. “burglary.Rdata” gives Burglary data for Sheffield: The variables are:
+
+a. WARD_NO: ward number 
+
+b. WARD_NM: ward name 
+
+c. WARD_ID: census ID 
+
+d. HH: number of households 
+
+e. BURG: number of burglaries in 1995 
+
+f. TDI: Townsend deprivation index (TDI)
+
+g. TO: population turnover (percentage residents having moved within one year of the 1991 census)
+
+2. “wards_err.GAL” a GAL file to create Sheffield ward neighbours.
+
+A ward is a local authority area, typically used for electoral purposes.
+
+Material deprivation refers to the inability for individuals or households to afford those consumption goods and activities that are typical in a society at a given point in time, irrespective of people's preferences with respect to these items. Material deprivation is measures using the Townsend Deprivation Index whereby a large positive implies deprived and a large negative implies affluent.
+
+More info: https://en.wikipedia.org/wiki/Townsend_deprivation_index
+
+```{r}
+library(spdep)
+```
+
+Answer the following questions:
+
+a) (5 marks) Load the GAL file and fix the error. Create a weights list object using the (i) row normalised weights style and (ii) binary weights style.
+
+Running (wards.nb = read.gal("wards_err.GAL")) throws the following error:
+
+`Error in read.gal("wards_err.GAL") : GAL file corrupted at region 10`
+
+To fix this, we simply examine the GAL file in .txt format, i.e.,
+
+```{r}
+# 0 29 sheffield wards
+# 1 5
+# 10 19 14 22 9
+# 2 3
+# 13 16 18 
+# 3 5
+# 27 20 8 11 5
+# 4 5
+# 21 12 25 10 19
+# 5 6
+# 3 23 8 11 21 6
+# 6 6
+# 8 5 21 17 25 24
+# 7 1
+# 27
+# 8 6
+# 3 5 6 17 13 16
+# 9 4             # the next line should have 4 region IDs
+# 12 10 1 22
+###############
+# 10 4        #   # the next line should have 5 (and not 4) region IDs
+# 12 4 19 1 9 #
+###############
+# 11 5            # the next line should have 5 region IDs
+# 20 3 26 23 5
+# 12 6
+# 27 29 21 4 10 9
+# 13 4
+# 8 16 18 2
+# 14 6
+# 25 24 16 19 1 22
+# 15 3
+# 27 23 29
+# 16 7
+# 8 17 24 13 14 2 22
+# 17 4
+# 8 6 24 16
+# 18 2
+# 13 2
+# 19 5
+# 4 25 10 14 1
+# 20 4
+# 27 3 26 11
+# 21 7
+# 23 5 29 6 12 4 25
+# 22 4
+# 16 14 1 9
+# 23 7
+# 27 26 11 15 5 29 21
+# 24 5
+# 6 17 25 16 14
+# 25 6
+# 21 6 4 24 19 14
+# 26 4
+# 27 20 23 11
+# 27 9
+# 28 7 20 3 26 23 15 29 12
+# 28 1
+# 27
+# 29 5
+# 27 23 15 21 12
+```
+
+Replacing 4 with 5 to the right of 10 in the enclosed box above resolves the error. We then save the updated GAL file as `wards.GAL` and continue as follows:
+
+```{r}
+(wards.nb = read.gal("wards.GAL"))
+(wards.wlist = nb2listw(wards.nb))              # (i)
+(wards.wlistB = nb2listw(wards.nb, style="B"))  # (ii)
+```
+
+b) (10 marks) Load the burglary dataset and create a new variable (give a summary): number of burglaries per 1000 households.
+
+```{r}
+# Sheffield burglary data
+load("burglary.Rdata")
+head(burglary)
+
+burglary$BURG_1000 = (burglary$BURG/burglary$HH)*1000
+head(burglary)
+```
+
+1. Conduct a Moran’s test on this variable and comment on the results.
+
+```{r}
+# Moran's I
+moran.test(burglary$BURG_1000, listw=wards.wlist)
+```
+
+2. What is the null hypothesis of the above test. Show the calculation to get the null Moran’s statistic.
+
+```{r}
+# Reject H0 at 5% level of significance, reject the null of no spatial autocorrelation.
+# There is sufficient evidence to suggest a significant spatial autocorrealtion for burglaries per 1000 HH.
+
+-1/(nrow(burglary)-1) # H0
+```
+
+3. Generate local Moran’s I statistics for each ward and show the calculation of the global Moran’s I statistic as the sum of local Moran’s I statistics.
+
+```{r}
+localm = localmoran(burglary$BURG_1000, listw=wards.wlist)
+head(localm)
+
+sum(localm[,1])/nrow(burglary) # Global Moran's I as the sum of Local Moran's
+```
+
+4. How many spatial outliers are there for the variable burglaries per 1000 households?
+
+```{r}
+moran.plot(burglary$BURG_1000, wards.wlist, main="Moran scatterplot") # Moran plot
+
+# There are 3 spatial outliers.
+```
+
+c) (5 marks) Create a binary variable based on TDI where positive means deprived (False), and negative means not deprived (True). Give a table for the new variable. Conduct a join count analysis on this new variable. State your conclusions clearly.
+
+```{r}
+burglary$TDI_IO = as.factor(burglary$TDI < 0)
+head(burglary)
+
+table(burglary$TDI_IO)
+
+# Join Count
+joincount.multi(burglary$TDI_IO, listw=wards.wlistB)
+
+# The observed BW count (T:F = 21) is less than the expected value under CSR (T:F = 35.9). 
+# Sufficient evidence to suggest significant clustering at 5% level of significance.
+```
+
+### EXTRA: Spatial Regression
+
+```{r}
+library(spatialreg)
+
+# OLS fit
+ols = lm(BURG_1000 ~ TDI + TO, data = burglary)
+summary(ols)
+
+lmtest::bptest(ols)
+tseries::jarque.bera.test(ols$residuals)
+
+# spatial test
+lm.morantest(ols, wards.wlist)
+moran.test(burglary$BURG_1000, wards.wlist)
+
+# spatial models
+sar = spautolm(BURG_1000 ~ 1, data=burglary, wards.wlist)
+slm = lagsarlm(BURG_1000 ~ TDI + TO, data=burglary, wards.wlist)
+sem = errorsarlm(BURG_1000 ~ TDI + TO, data=burglary, wards.wlist) 
+sarar = sacsarlm(BURG_1000 ~ TDI + TO, data=burglary, wards.wlist)
+
+summary(sar)
+summary(slm)
+summary(sem)
+summary(sarar)
+
+# LM tests
+lm.LMtests(ols, listw=wards.wlist, test="all")
+
+# LR tests (H0: OLS linear model)
+LR1.Sarlm(slm) # do not reject H0
+LR1.Sarlm(sarar) # do not reject H0
+
+# comprehensive LR tests
+LR.Sarlm(sem,sarar) # SEM vs SARAR --> do not reject H0
+LR.Sarlm(slm,sarar) # SLM vs SARAR --> do not reject H0
+LR.Sarlm(sar,slm) # SAR vs SLM --> reject H0
+
+# Conclusion: based on the LR tests, the OLS model seems to be the most suitable model.
+```

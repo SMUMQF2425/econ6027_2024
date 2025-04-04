@@ -1,0 +1,141 @@
+# Q1b
+
+```{r}
+library(sf); library(spdep); library(spatialreg); library(tmap)
+```
+
+a)
+
+```{r}
+# Load the shapefile for Italian regions
+italy <- st_read("italy.shp")
+italy
+
+# Load the fertility data
+fertility <- read.csv("Fertility2011.csv")
+fertility
+
+# Ensure both datasets have a common key to join on
+# Assuming "REGION" in `italy` matches a column in `fertility`
+# You might need to change "RegionName" to the actual column name in `fertility` if different
+colnames(fertility)[1] <- "REGION"  # Update column name if necessary
+
+# Merge the datasets
+fertility_spatial <- merge(italy, fertility, by = "REGION")
+fertility_spatial
+plot(st_geometry(fertility_spatial))
+
+# Check validity of each geometry
+validity_check <- st_is_valid(fertility_spatial)
+
+# Print the validity results
+validity_check
+
+# If there are invalid geometries, we can attempt to make them valid using st_make_valid()
+if (any(!validity_check)) {
+  fertility_spatial <- st_make_valid(fertility_spatial)
+  print("Some geometries were invalid and have been corrected.")
+}
+
+# Check validity again after correction
+validity_check_after <- st_is_valid(fertility_spatial)
+validity_check_after
+```
+
+b)
+
+```{r}
+# Set tmap mode to "plot" for static maps (use "view" for interactive maps)
+tmap_mode("plot")
+
+# Plot the fertility rates
+tm_shape(fertility_spatial) +
+  tm_polygons("Fertility.rate", 
+              palette = "YlGnBu", # iii. Change color palette
+              title = "Fertility rate") +
+  tm_scale_bar(position = c("left", "bottom")) + # i. Add scale bar
+  tm_compass(type = "8star", position = c("right", "top")) + # ii. Add north arrow
+  tm_layout(main.title = "Regional fertility rates in Italy (2011)",
+            main.title.size = 1,          # Decrease main title font size
+            legend.title.size = 0.8,      # Decrease legend title font size
+            legend.text.size = 0.7,       # Decrease legend text font size
+            legend.outside = TRUE)
+```
+
+c)
+
+```{r}
+# i.
+# Regress fertility rate on all other variables
+full_model <- lm(Fertility.rate ~ Employment.rate + Unemployment.rate + GDP.growth.rate, data = fertility_spatial)
+summary(full_model)
+
+# ii.
+# Stepwise elimination of non-significant variables
+sub_model <- step(full_model, direction = "backward")
+```
+
+Comment: Using a stepwise selection approach, the variable GDP.growth.rate was identified as not contributing significantly to explaining variations in the fertility rate. Removing it resulted in a reduced model that includes only Employment.rate and Unemployment.rate. This sub-model was chosen based on minimising the AIC (Akaike Information Criterion), which suggests that the reduced model offers a better trade-off between model complexity and goodness-of-fit.
+
+```{r}
+# iii.
+summary(sub_model)
+```
+
+Comment: The sub-model is superior to the full model because it includes only the variables that are statistically significant, leading to a simpler and more parsimonious model. By removing GDP.growth.rate, which did not significantly contribute to explaining the fertility rate, the sub-model reduces the potential for overfitting and focuses on the primary predictors. Additionally, the adjusted $R$-squared of the sub-model is close to that of the full model, indicating that the model fit has not been substantially compromised, while the AIC is lower in the sub-model, supporting its use as a more efficient model.
+
+d)
+
+```{r}
+# Create spatial weights list from the neighbour file
+it_nb <- read.gal("italy.gal")
+it_lw <- nb2listw(it_nb, style = "W")
+
+# Run spatial regression models
+
+# Spatial Autoregressive Model (SAR)
+fertility_SAR <- spautolm(Fertility.rate ~ 1, data = fertility_spatial, listw = it_lw)
+fertility_SAR
+
+# Spatial Lag Model (SLM)
+fertility_SLM <- lagsarlm(Fertility.rate ~ Employment.rate + Unemployment.rate, data = fertility_spatial, listw = it_lw)
+fertility_SLM
+
+# Spatial Error Model (SEM)
+fertility_SEM <- errorsarlm(Fertility.rate ~ Employment.rate + Unemployment.rate, data = fertility_spatial, listw = it_lw)
+fertility_SEM
+
+# Spatial Autoregressive Combined Model (SARAR)
+fertility_SARAR <- sacsarlm(Fertility.rate ~ Employment.rate + Unemployment.rate, data = fertility_spatial, listw = it_lw)
+fertility_SARAR
+
+# Conduct diagnostic tests
+
+# LM tests for spatial dependence in the OLS model
+lm_tests <- lm.LMtests(full_model, listw = it_lw, test = "all")
+lm_tests
+
+# Likelihood ratio tests to compare models
+LR_SLM_SAR <- LR.Sarlm(fertility_SLM, fertility_SAR)
+LR_SLM_SAR
+
+LR_SEM_SARAR <- LR.Sarlm(fertility_SEM, fertility_SARAR)
+LR_SEM_SARAR
+
+LR_SAR_SLM <- LR.Sarlm(fertility_SAR, fertility_SLM)
+LR_SAR_SLM
+```
+
+Comment: Based on the results from the spatial regression models and diagnostic tests, we obtain the following findings:
+
+1. LM tests: The Lagrange Multiplier (LM) tests for spatial dependence in the OLS model (including RSerr, RSlag, adjRSerr, adjRSlag, and SARMA) show high $p$-values (all above 0.2). This suggests that there isn’t strong evidence of spatial dependence in the residuals of the OLS model.
+
+2. Likelihood Ratio (LR) tests: Despite the LM tests not providing strong evidence of spatial dependence in the OLS model, the likelihood ratio tests among the spatial models reveal notable insights:
+
+1. LR test between SAR and SLM: The $p$-value is 0.0097, indicating a statistically significant difference between the SAR and SLM models. The higher log-likelihood in the SLM model (22.04878 compared to 17.41134 in SAR) suggests that the SLM model better captures the spatial structure in the data.
+
+2. LR test between SEM and SARAR: The $p$-value here is 0.4746, indicating no significant difference between the SEM and SARAR models. While the SARAR model has a slightly higher log-likelihood (22.0755 versus 21.81987 in SEM), the lack of significance suggests both models fit the data similarly well.
+
+3. LR test between SLM and SAR (reversed order): Again, with a $p$-value of 0.0097, this test confirms the significant difference, favouring the SLM model due to its higher log-likelihood (22.04878 in SLM vs. 17.41134 in SAR).
+
+Among all the spatial models, the SLM model has the highest log-likelihood (22.04878), indicating it provides the best fit for capturing spatial dependencies in fertility rates when compared to SAR, SEM, and SARAR models. Although the LM tests suggest weak spatial dependence, the significant LR test results, especially between SAR and SLM, underscore the SLM model's superiority. The consistently higher log-likelihood of the SLM model signifies its effectiveness in modelling spatial interactions. Consequently, the spatial lag model (SLM) is more appropriate than the simple linear regression model in (c), as it better captures the spatial dependencies in the data. This supports the conclusion that accounting for spatial lag effects improves model fit and explanatory power for regional fertility rates in Italy.

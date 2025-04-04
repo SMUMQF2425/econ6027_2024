@@ -1,0 +1,95 @@
+
+```{r}
+################
+# 7c Solutions #
+################
+
+library(spatstat); library(sf)
+
+# window
+blocks = st_read("blocks.shp") # New Haven polygon
+table(st_is_valid(blocks)) # all valid
+nh = st_union(blocks) # Newhaven outline
+(nh.owin = as.owin(nh)); class(nh.owin)
+
+# forced burglaries
+(burgres.f = st_read("burgres_f.shp")) # Forced burglaries points
+(burgres.f = burgres.f[ , -1]) # remove FID
+st_crs(burgres.f)$proj # projected, good to go
+isTRUE(all.equal(st_crs(burgres.f), st_crs(blocks))) # CRS is projected and same as points
+(FB.ppp = as.ppp(burgres.f)) # sf to ppp
+Window(FB.ppp) = nh.owin # set window
+FB.ppp; plot(FB.ppp)
+table(duplicated(FB.ppp)) # duplicates
+(FB.ppp = rjitter(FB.ppp, retry=T))
+
+# KDE for forced burglaries
+FB.kde = density(FB.ppp, bw.diggle)
+par(mfrow=c(1,2))
+plot(FB.ppp)
+plot(FB.kde)
+par(mfrow=c(1,1))
+
+# Non-forced burglaries
+(burgres.n = st_read("burgres_n.shp"))
+(burgres.n = burgres.n[ , -1]) # remove FID
+st_crs(burgres.n)$proj # projected, good to go
+isTRUE(all.equal(st_crs(burgres.n), st_crs(blocks))) # CRS is projected and same as points
+(NB.ppp = as.ppp(burgres.n)) # sf to ppp
+Window(NB.ppp) = nh.owin # set window
+NB.ppp; plot(NB.ppp)
+table(duplicated(NB.ppp)) # duplicates
+(NB.ppp = rjitter(NB.ppp, retry=T))
+
+# KDE for non-forced burglaries
+NB.kde = density(NB.ppp, bw.diggle)
+par(mfrow=c(1,2))
+plot(NB.ppp)
+plot(NB.kde)
+
+# Comparison
+plot(FB.kde)
+plot(NB.kde)
+par(mfrow=c(1,1))
+# Both forced and non-forced burglaries are concentrated in the same neighbourhood. 
+# However, forced burglaries are more concentrated compared to non-forced burglaries.
+
+# Different bandwidths for breach
+(breach = st_read("breach.shp")) # point data
+(breach = breach[ ,-1]) # remove FID column
+st_crs(breach)$proj # breach is projected, good to go
+isTRUE(all.equal(st_crs(breach), st_crs(blocks))) # CRS is projected and same as points
+(breach.ppp = as.ppp(breach))
+Window(breach.ppp) = nh.owin
+table(duplicated(breach.ppp)) # many duplicated entries
+(breach.ppp = rjitter(breach.ppp, retry=T)); table(duplicated(breach.ppp))
+
+breach1 = density(breach.ppp, bw.diggle) # 333.6992
+breach2 = density(breach.ppp, bw.CvL) # 4048.078 
+breach3 = density(breach.ppp, bw.scott) # 2603.386, 1857.027
+breach4 = density(breach.ppp, bw.ppl) # 750.2703 
+
+par(mfrow=c(2,2))
+plot(breach1, main="bw.diggle")
+plot(breach2, main="bw.CvL")
+plot(breach3, main="bw.scott")
+plot(breach4, main="bw.ppl")
+
+# Different kernels
+breach.gaussian = density(breach.ppp, bw.diggle)
+breach.epanechnikov = density(breach.ppp, sigma=bw.diggle(breach.ppp), 
+                              kernel="epanechnikov")
+breach.quartic = density(breach.ppp, 
+                         sigma=bw.diggle(breach.ppp), kernel="quartic")
+breach.disc = density(breach.ppp, 
+                      sigma=bw.diggle(breach.ppp), kernel="disc")
+
+plot(breach.gaussian, main="Gaussian")
+plot(breach.epanechnikov, main="epanechnikov")
+plot(breach.quartic, main="quartic")
+plot(breach.disc, main="disc")
+par(mfrow=c(1,1))
+
+# Notice how different bandwidths lead to very different KDEs while different kernels don't affect the KDE so much.
+```
+

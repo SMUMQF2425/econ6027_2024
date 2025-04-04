@@ -1,0 +1,84 @@
+
+```{r}
+################
+# 4b Solutions #
+################
+
+library(sf); library(spData)
+
+# Exercise A
+sg.coords = c(103.82,1.35)
+
+# Exercise B
+# source("LonLat2UTM.R")
+# (utm.tokyo = lonlat2UTM(tokyo.coords))
+# (utm.ffurt = lonlat2UTM(frankfurt.coords))
+# (utm.ny = lonlat2UTM(ny.coords))
+# (utm.rio = lonlat2UTM(rio.coords))
+# (utm.jburg = lonlat2UTM(jburg.coords))
+# (utm.beijing = lonlat2UTM(beijing.coords))
+# You can check your answers by inserting the EPSG numbers generated to https://epsg.io to see whether the code correspond to the area intended.
+
+# Exercise C
+
+# C1. LongLat, EPSG 4326
+st_crs(world)
+plot(st_geometry(world), col="white", main="+proj=longlat +datum=WGS84 +no_defs ")
+
+# C2. Web Mercator, EPSG 3857
+world.wm = st_transform(world, 3857)
+st_crs(world.wm) 
+plot(st_geometry(world.wm), col="white", main="+Web Mercator Projection")
+
+# C3. World Robinson, "+proj=robin"
+world.Rob = st_transform(world, "+proj=robin")
+st_crs(world.Rob)
+plot(st_geometry(world.Rob), col="white", reset=F, main="World Robinson")
+# Add graticules
+g = st_graticule()
+g = st_transform(g, "+proj=robin")
+plot(st_geometry(g), add=T, col="lightgrey")
+
+# C4. Mollweide projection, "+proj=moll"
+world.moll = st_transform(world, "+proj=moll")
+st_crs(world.moll)
+plot(st_geometry(world.moll), col="white", reset=F, main="Mollweide projection")
+# Add graticules
+g = st_graticule()
+g = st_transform(g, "+proj=moll")
+#or g = st_graticule() %>% st_transform(crs="+proj=moll")
+plot(st_geometry(g), add=T, col="lightgrey")
+
+# C5. Lambert Azimuthal equal area projection
+CRS = "+proj=laea +x_0=0 +y_0=0 +lon_0=0 +lat_0=0"
+# centred at lon=lat=0
+world.lamea = st_transform(world, crs=CRS) 
+st_crs(world.lamea)$epsg
+plot(st_geometry(world.lamea), col="white", reset=F, graticule=T, main="Lambert azimuthal equal-area projection")
+
+# C6. Lambert azimuthal equal-area projection (centered at Singapore)
+  CRS = "+proj=laea +x_0=0 +y_0=0 +lon_0=103.82 +lat_0=1.35"
+world.sgcen = st_transform(world, crs=CRS)
+g = st_graticule() %>% st_transform(crs=CRS) 
+plot(st_geometry(world.sgcen), col="white", main="SG and friends", reset=F) 
+plot(st_geometry(g), add=T, col="lightgrey")
+# Clearly not the best world map but centered on us nevertheless!
+
+# Exercise D
+sg_pa = st_read("MySingapura.shp")
+st_is_longlat(sg_pa)
+st_crs(sg_pa)$Name
+st_crs(sg_pa)$proj4string
+st_crs(sg_pa)$epsg
+plot(st_geometry(sg_pa))
+
+# Exercise E
+my_CRS = "+proj=laea +ellps=WGS84 +lon_0=-95 +lat_0=60 +units=m"
+canada = dplyr::filter(world, name_long == "Canada")
+new_canada = st_transform(canada, my_CRS)
+par(mfrow = c(1, 2))
+plot(st_geometry(canada), graticule = T, axes = T)
+plot(st_geometry(new_canada), graticule = T, axes = T)
+par(mfrow = c(1, 1))
+```
+

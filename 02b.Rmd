@@ -1,0 +1,122 @@
+---
+title: "ECON6027_2b"
+author: "Dr. Liu"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Coordinate reference systems and projections
+
+We can use the following commands to inspect the CRS object (if it exists) in the loaded dataset.
+
+```{r}
+library(sf); library(spData)
+# CRS
+st_crs(world)
+# st_crs(world)$wkt
+st_crs(world)$epsg
+st_crs(world)$Name 
+st_crs(world)$proj4string
+st_crs(seine)$proj4string
+
+sf_proj_info(type = "ellps") # available ellipsoids
+# rf = a/(a-b), the inverse flattening parameter
+sf_proj_info(type = "proj") # available projections
+```
+
+## GET TO WORK: Fiji dataset
+
+The data set give the locations of 1000 seismic events of MB \> 4.0. The events occurred in a cube near Fiji since 1964. This is a basic data frame that treats the positional data in "lat" and "lon" as another set of attributes.
+
+```{r}
+fiji = datasets::quakes
+head(fiji)
+class(fiji)
+plot(fiji)
+```
+
+Let us give this dataset "spatial awareness"
+
+```{r}
+fiji.sf = st_as_sf(fiji, coords=c("long","lat"))
+class(fiji.sf)
+summary(fiji.sf)
+plot(fiji.sf)
+```
+
+We have an sf object that is aware of location... However, no CRS.
+
+```{r}
+st_is_longlat(fiji.sf)
+st_crs(fiji.sf)
+```
+
+That means we know the numbers refer to "locations", but we have no idea where on "Earth" exactly these locations are. In general, geographic datasets without a CRS can be of limited use unless we are conducting an isolated study of some sort.
+
+It is ok not to know a CRS too. Only earth locations can have a CRS, but spatial data analysis is much larger. A "space" can be defined in many non-geographic forms including social networks, parts of your body, areas of a building, etc that. Even geographic locations that we study may not conform to the standard Earth CRS definitions (like sunspots or lunar craters).
+
+Due to this reason if no CRS is specified, sf is still able to perform all the calculations.
+
+### Geographic CRS
+
+The dataset gives latitudes and longitudes near Fiji, we know they come from EPSG4326. EPSG:4326 -WGS 84, is latitude/longitude coordinate system based on the Earth's centre of mass, used by the GPS system among others.
+
+```{r}
+fiji.geo = st_set_crs(fiji.sf, 4326)
+st_is_longlat(fiji.geo)
+st_crs(fiji.geo)$proj4string
+plot(fiji.geo)
+```
+
+### Projected CRS
+
+We project/re-project spatial objects when (i) we perform [**metric**]{.underline} distance-based analyses, (ii) we want to compare more than one dataset with different CRS definitions, and (iii) online publishing of data may require certain conventions. Some examples are given below.
+
+Robinson projection:
+
+```{r}
+fiji.proj = st_transform(fiji.geo, crs = "+proj=robin")
+st_crs(fiji.proj)$proj4string
+st_crs(fiji.proj)$epsg
+plot(fiji.proj) # clearly this projection is not suitable for the data.
+```
+
+Pseudo Mercator projection:
+
+```{r}
+fiji.proj2 = st_transform(fiji.geo, crs=3857)
+st_crs(fiji.proj2)$proj4string
+st_crs(fiji.proj2)$epsg
+plot(fiji.proj2) # not good again
+```
+
+### UTM
+
+A commonly used default is Universal Transverse Mercator (UTM): A set of CRSs that divides the Earth into 60 longitudinal wedges and 20 latitudinal segments. The UTM projection is commonly used in research because it tends to be more locally accurate, and furthermore, it has attributes that make the estimating distance easy and accurate. Positions are described using Easting and Northing coordinates.
+
+Almost every place on Earth has a UTM code. All UTM projections have the same datum (WGS84) and their EPSG codes run sequentially from 32601 to 32660 for northern hemisphere locations and from 32701 to 32760 for southern hemisphere locations.
+
+```{r}
+source("LonLat2UTM.R") # Load function
+sg.coords = c(103.82,1.35)
+(utm.sg = lonlat2UTM(sg.coords))
+#st_crs(utm.sg)
+st_crs(utm.sg)$proj4string
+```
+
+Let us re-visit the Fiji dataset...
+
+```{r}
+fiji.coords = c(178.07, -17.71) # confirm this
+(utm.fiji = lonlat2UTM(fiji.coords))
+st_crs(utm.fiji)$proj4string
+fiji.proj3 = st_transform(fiji.geo, crs=utm.fiji)
+plot(fiji.proj3) # much better!
+```
+
+

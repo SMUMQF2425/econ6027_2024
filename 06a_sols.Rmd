@@ -1,0 +1,88 @@
+
+```{r}
+################
+# 8a Solutions #
+################
+
+library(sf); library(spdep)
+
+# Activity A
+
+# read the gal file for South Asian countries
+# (s_asia_nb = read.gal("s_asia.gal"))
+
+################################################
+
+# Activity B
+
+(UK = st_read("NUTS_Level_1__January_2018__Boundaries.shp"))
+
+
+# Part a #
+
+# queen contiguity from GAL file
+(UK_GAL_nb = read.gal("uk_cont.gal"))
+
+# queen contiguity from polygons
+(UK1_nb = poly2nb(UK)) 
+
+# queen contiguity from polygons with Scotland and Nire link
+Scot = subset(UK, nuts118nm=="Scotland")
+NIre = subset(UK, nuts118nm=="Northern Ireland")
+st_distance(Scot, NIre)
+(UK_nb = poly2nb(UK, queen=T, snap=20500))
+write.nb.gal(UK_nb, "UK_nb.gal", oldstyle=F)
+isTRUE(all.equal(UK1_nb, UK_nb, check.attributes = F))
+isTRUE(all.equal(UK_GAL_nb, UK_nb, check.attributes = F))
+
+# rook contiguity from polygons
+(UK2_nb = poly2nb(UK, queen=F))
+
+# plot contiguous neighbours
+UK_coords = st_point_on_surface(st_geometry(UK))
+
+plot(st_geometry(UK), border="grey60", axes=T,  main="Queen Contiguity")
+plot(UK1_nb, UK_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(UK), border="grey60", axes=T,  main="Rook Contiguity")
+plot(UK2_nb, UK_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(UK), border="grey60", axes=T,  main="Queen Contiguity with Rook in Red")
+plot(UK1_nb, UK_coords, pch=19, cex=0.6, col="red", add=T)
+plot(UK2_nb, UK_coords, pch=19, cex=0.6,add=T)
+
+isTRUE(all.equal(UK1_nb, UK2_nb, check.attributes = F))
+
+# k nearest neighbours
+(IDs = row.names(UK))
+UK3_nb = knn2nb(knearneigh(UK_coords, k = 1), row.names = IDs)
+UK4_nb = knn2nb(knearneigh(UK_coords, k = 2), row.names = IDs)
+UK5_nb = knn2nb(knearneigh(UK_coords, k = 3), row.names = IDs)
+
+# plot
+plot(st_geometry(UK), border="grey60", axes=T,  main="k=1")
+plot(UK3_nb, UK_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(UK), border="grey60", axes=T,  main="k=2")
+plot(UK4_nb, UK_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(UK), border="grey60", axes=T,  main="k=3")
+plot(UK5_nb, UK_coords, pch=19, cex=0.6, add=T)
+
+# Distance based neighbours
+st_crs(UK)$units
+summary(sqrt(st_area(UK))) # to understand the scale
+UK6_nb = dnearneigh(UK_coords, d1 = 0, d2 = 100000, row.names = IDs)
+UK7_nb = dnearneigh(UK_coords, d1 = 0, d2 = 200000, row.names = IDs)
+UK8_nb = dnearneigh(UK_coords, d1 = 0, d2 = 300000, row.names = IDs)
+
+plot(st_geometry(UK), border="grey60", axes=T,  main="Within 100km")
+plot(UK6_nb, UK_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(UK), border="grey60", axes=T,  main="Within 200km")
+plot(UK7_nb, UK_coords, pch=19, cex=0.6, add=T)
+
+plot(st_geometry(UK), border="grey60", axes=T,  main="Within 300km")
+plot(UK8_nb, UK_coords, pch=19, cex=0.6, add=T)
+```
+

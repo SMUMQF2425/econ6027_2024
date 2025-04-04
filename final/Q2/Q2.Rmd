@@ -1,0 +1,211 @@
+# Q2
+
+```{r}
+library(sf); library(tmap); library(gstat)
+```
+
+a)
+
+```{r}
+# Load the precipitation shapefile (EPSG:4326) and Singapore boundary shapefile (EPSG:3414)
+precip <- st_read("precip.shp")
+precip
+
+sg <- st_read("sg.shp")
+sg
+
+# Ensure coordinate reference systems are set correctly
+st_crs(precip) # Verify CRS is EPSG:4326
+st_crs(sg) # Verify CRS is EPSG:3414
+
+# Transform Singapore boundary CRS to match precipitation CRS
+sg_transformed <- st_transform(sg, st_crs(precip))
+
+# Check if geometries are valid after CRS transformation
+validity_check <- st_is_valid(sg_transformed)
+validity_check
+
+# If any geometries are invalid, print them
+if (any(!validity_check)) {
+  cat("Invalid geometries found:\n")
+  print(sg_transformed[!validity_check, ])
+} else {
+  cat("All geometries are valid.\n")
+}
+
+# Voronoi tessellation
+precip_sp <- as(precip, "Spatial") # Convert to spatial object
+voro_sp <- dismo::voronoi(precip_sp) # Generate Voronoi polygons
+voro_sf <- st_as_sf(voro_sp) # Convert back to sf object
+
+# Clip Voronoi polygons to Singapore boundary
+voro_clipped <- st_intersection(voro_sf, sg_transformed)
+
+# Generate the plot
+voro_plot <- tm_shape(voro_clipped) +
+  tm_polygons(col = "precip", 
+              palette = "YlGnBu", 
+              title = "precipitation", 
+              style = "fixed", 
+              breaks = seq(0, 7, 1)) + # Define legend breaks (0 to 7)
+  tm_layout(main.title = "Voronoi Tessellation of Precipitation", 
+            legend.title.size = 1, 
+            legend.text.size = 0.8)
+
+# Display the plot
+voro_plot
+```
+
+b)
+
+```{r}
+# Define the number of grid points (100 x 100 = 10,000)
+grid_size <- 100
+
+# Create a bounding box for Singapore's boundary
+sg_bbox <- st_bbox(sg_transformed)
+
+# Generate a grid of points within the bounding box
+x_seq <- seq(sg_bbox["xmin"], sg_bbox["xmax"], length.out = grid_size)
+y_seq <- seq(sg_bbox["ymin"], sg_bbox["ymax"], length.out = grid_size)
+
+# Create a data frame of grid coordinates
+grid_points <- expand.grid(x = x_seq, y = y_seq)
+
+# Convert to an sf object with the same CRS as Singapore's boundary
+grid_sf <- st_as_sf(grid_points, coords = c("x", "y"), crs = st_crs(sg_transformed))
+
+# Clip the grid to the Singapore boundary
+grid_clipped <- st_intersection(grid_sf, sg_transformed)
+
+# Plot the grid points
+grid_plot <- tm_shape(sg_transformed) +
+  tm_borders(col = "black") +
+  tm_shape(grid_clipped) +
+  tm_dots(size = 0.01, col = "blue") +
+  tm_layout(main.title = "Square grid of unsampled points", 
+            main.title.size = 1.2)
+
+# Display the plot
+grid_plot
+```
+
+c)
+
+```{r}
+# Convert grid and precipitation data to spatial objects
+grid_sp <- as(grid_clipped, "Spatial")
+precip_sp <- as(precip, "Spatial")
+
+# Create an empty raster based on the grid for interpolation
+raster_template <- raster::raster(extent(grid_sp),
+                                  res = c((st_bbox(sg_transformed)$xmax - st_bbox(sg_transformed)$xmin) / 100,
+                                  (st_bbox(sg_transformed)$ymax - st_bbox(sg_transformed)$ymin) / 100),
+                          crs = st_crs(sg_transformed)$proj4string)
+
+# Perform IDW interpolation with idp=1
+idw_1 <- idw(formula = precip ~ 1, locations = precip_sp, newdata = grid_sp, idp = 1)
+raster_idw_1 <- raster::rasterize(grid_sp, raster_template, field = idw_1$var1.pred)
+
+# Perform IDW interpolation with idp=3
+idw_3 <- idw(formula = precip ~ 1, locations = precip_sp, newdata = grid_sp, idp = 3)
+raster_idw_3 <- rasterize(grid_sp, raster_template, field = idw_3$var1.pred)
+
+# Plot the results for idp=1 directly using the raster
+idw_1_plot <- tm_shape(raster_idw_1) +
+  tm_raster(palette = "YlGnBu", title = "Precipitation (idp=1)") +
+  tm_shape(sg_transformed) +
+  tm_borders(col = "black") +
+  tm_layout(main.title = "IDW interpolation (idp=1)")
+idw_1_plot
+
+# Plot the results for idp=3 directly using the raster
+idw_3_plot <- tm_shape(raster_idw_3) +
+  tm_raster(palette = "YlGnBu", title = "Precipitation (idp=3)") +
+  tm_shape(sg_transformed) +
+  tm_borders(col = "black") +
+  tm_layout(main.title = "IDW Interpolation (idp=3)")
+idw_3_plot
+```
+
+Comment: Based on the two visualisations:
+
+1. IDW with `idp=1`: This interpolation produces a smoother distribution of precipitation values across Singapore. It emphasises regional patterns, creating a gradual transition in precipitation levels and reducing localised variations.
+
+2. IDW with `idp=3`: This version emphasises localised variations, showing more distinct differences in precipitation across small areas. Higher `idp` values place greater weight on nearby points, resulting in a more "patchy" distribution, which highlights small, localised fluctuations in precipitation.
+
+##### Which `idp` is more appropriate?
+
+The choice of `idp` depends on the objective of the interpolation:
+
+- If the goal is to capture broader, regional trends in precipitation, where gradual changes are expected over larger areas, then `idp=1` is more appropriate.
+
+- If the goal is to capture highly localised variations, then `idp=3` would be more suitable as it shows sharper changes and highlights localised precipitation differences.
+
+##### Practicality in the Singapore context
+
+The context of Singapore, a densely populated urban environment with relatively small geographical area, capturing broader precipitation trends rather than localised micro-variations is more practical and useful for urban planning, infrastructure design, and flood management. Therefore, `idp=1` is the preferred choice for interpolating precipitation data in Singapore. 
+
+Using `idp=1` provides a smoother, more generalised precipitation map, which aligns well with the need for a cohesive overview of rainfall patterns across the city-state. This approach reduces noise from small-scale variations, offering a clearer picture of regional precipitation trends that can be more effectively applied to large-scale decision-making processes in Singapore’s urban context.
+
+d)
+
+```{r}
+# i.
+library(automap)
+# Estimate empirical semi-variogram
+sv <- variogram(precip ~ 1, precip_sp)
+
+# Fit parametric models for the semi-variogram: Stein, Exponential, and Matern
+sv_stein <- fit.variogram(sv, vgm(psill=1, model="Ste", range=0.1), warn.if.neg=TRUE)
+sv_exp <- fit.variogram(sv, vgm(psill=1, model="Exp", range=0.1), warn.if.neg=TRUE)
+sv_matern <- fit.variogram(sv, vgm(psill=1, model="Mat", range=0.1, kappa=0.5), warn.if.neg=TRUE)
+
+# Plot the empirical and fitted semi-variograms
+plot_stein <- plot(sv, model = sv_stein, main = "Fitted Semi-Variogram (Stein)")
+plot_exp <- plot(sv, model = sv_exp, main = "Fitted Semi-Variogram (Exponential)")
+plot_matern <- plot(sv, model = sv_matern, main = "Fitted Semi-Variogram (Matern)")
+
+# Display all plots to compare and select the best model visually
+library(gridExtra)
+grid.arrange(plot_stein, plot_exp, plot_matern, nrow = 1)
+
+# Select the best model
+best_model <- sv_exp
+best_model
+
+# ii.
+# Perform simple kriging with the selected model and a known mean (e.g., mean of precipitation data)
+mean_precip <- mean(precip_sp$precip, na.rm = TRUE) # Set known mean value
+sk_result <- krige(precip ~ 1, locations = precip_sp, newdata = grid_sp, model = best_model, beta = mean_precip)
+summary(sk_result)
+
+# iii.
+# Plot the reconstructed topology with breaks comparable to the Voronoi tessellation in part (a)
+sk_plot <- tm_shape(sk_result_sf) +
+  tm_dots("var1.pred", palette = "YlGn", breaks = c(0, 1, 2, 3, 4, 5, 6, 7), title = "Precipitation") +
+  tm_layout(main.title = "SK estimate of precipitation")
+
+# Display the plot
+sk_plot
+```
+
+e)
+
+```{r}
+# Perform ordinary kriging with the selected model
+ok_result <- krige(precip ~ 1, locations = precip_sp, newdata = grid_sp, model = best_model)
+summary(ok_result)
+
+# iii.
+# Plot the reconstructed topology with breaks comparable to the Voronoi tessellation in part (a)
+ok_plot <- tm_shape(sk_result_sf) +
+  tm_dots("var1.pred", palette = "YlGn", breaks = c(0, 1, 2, 3, 4, 5, 6, 7), title = "Precipitation") +
+  tm_layout(main.title = "OK estimate of precipitation")
+
+# Display the plot
+ok_plot
+
+# Arrange the three plots side by side
+tmap_arrange(voro_plot, idw_1_plot, ok_plot)
+```

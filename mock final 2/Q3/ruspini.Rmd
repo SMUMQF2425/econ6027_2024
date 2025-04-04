@@ -1,0 +1,105 @@
+# Question 3: Point Data (30 marks)
+
+Shared with you is the famous “ruspini” dataset.
+
+You are required to prepare a report conducting a comprehensive point pattern analysis of the ruspini clusters.
+
+Label your outputs clearly and remember to give your interim conclusion at each stage and your overall conclusion. Your analysis can include various calculations, tests and plots to support your conclusions.
+
+Remember to conduct suitable edge corrections and alternative competing analysis in each section. Since clustering is clearly present, one tailed tests are preferred over two tailed tests.
+
+```{r}
+library(spatstat); library(sf); library(tmap); library(sp)
+
+# load data
+load("ruspini.Rdata")
+head(ruspini)
+
+(ruspini.sf = st_as_sf(ruspini, coords = c("x", "y")))
+
+plot(ruspini.sf, main="ruspini points")
+
+# to ppp
+(ruspini.ppp = as.ppp(st_geometry(ruspini.sf)))
+
+plot(ruspini.ppp)
+
+##########################
+# QUADRAT COUNT ANALYSIS #
+##########################
+
+qc = quadratcount(ruspini.ppp,nx=10, ny=15)
+plot(qc)
+
+(quad.test = quadrat.test(ruspini.ppp, nx=10, ny=15))
+
+# Reject the null of CSR at 5% level of significance.
+
+# plots
+qc = data.frame(qc)
+qc.table = data.frame(table(qc$Freq, exclude=NULL))
+qc.table[,1] = as.numeric(levels(qc.table[,1]))
+qc.table$xf = qc.table[,1]*qc.table[,2]
+sums = colSums(qc.table[,-1])
+lambda = sums[2]/sums[1]
+qc.table$O_pr = qc.table[,2]/sums[1]
+qc.table$E_pr = dpois(qc.table[,1], lambda=lambda)
+plot(c(0,6),c(0,.8), type="n", 
+     xlab="Number of incidents per Subquadrat (Red=Observed, Blue=Expected)", 
+     ylab="Frequency of Occurances", main="Quadrat counts: Observed vs Expected")
+points(qc.table$Var1, qc.table$E_pr, col="Blue", type="l", lwd=2)
+points(qc.table$Var1, qc.table$O_pr, col="Red", type="l", lwd=2)
+
+# the point pattern does not follow an HPP due to the difference at counts 0, 1 & 2.
+
+############################
+# KKERNEL DENSITY ESTIMATE #
+############################
+
+kde1 = density(ruspini.ppp, sigma=bw.scott(ruspini.ppp))
+kde2 = density(ruspini.ppp, sigma=bw.diggle(ruspini.ppp))
+kde3 = density(ruspini.ppp, sigma=bw.CvL(ruspini.ppp))
+kde4 = density(ruspini.ppp, sigma=bw.ppl(ruspini.ppp))
+
+# Sigma values
+bw.scott(ruspini.ppp)
+bw.diggle(ruspini.ppp)
+bw.CvL(ruspini.ppp)
+bw.ppl(ruspini.ppp)
+
+plot(kde1, main="Kernel denstiy using Scott's rule")
+plot(kde2, main="Kernel denstiy using Diggle method")
+plot(kde3, main="Kernel denstiy using CvL method")
+plot(kde4, main="Kernel denstiy using ppl method")
+
+# Four visible clusters.
+# The northern cluster is the most intense.
+
+#######################################
+# NEAREST NEIGHBOUR DISTANCE ANALYSIS #
+#######################################
+
+ruspini.nnd = nndist(ruspini.ppp, k=1)
+summary(ruspini.nnd)
+
+hist(ruspini.nnd)
+
+clarkevans(ruspini.ppp, correction="Donnelly")
+clarkevans.test(ruspini.ppp, correction="Donnelly", alternative="clustered")
+
+# Conclusion: there seem to be significant clustering in this data.
+
+#######################
+# K-FUNCTION ANALYSIS #
+#######################
+
+kf = envelope(ruspini.ppp, Kest, correction="best", alternative="greater")
+
+gf = envelope(ruspini.ppp, Gest, correction="best", alternative="greater")
+
+par(mfrow=c(1,2))
+plot(kf, main="K-Function")
+plot(gf, main="G-Function")
+par(mfrow=c(1,1))
+# Significant clustering present
+```

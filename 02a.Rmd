@@ -1,0 +1,95 @@
+---
+title: "ECON6027_2a"
+author: "Dr. Liu"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Geometry operations
+
+We will mostly work with the "seine" dataset from the spData package and use the "nz" dataset for the practice exercises. This lesson is on how to handle the geometry column of the sf object.
+
+```{r}
+library(spData); library(sf)
+class(seine)
+seine
+```
+
+### Simplify
+
+If the dataset is too large (i.e. the features are overly detailed), then in order to save RAM and increase computational speed, we may need to simplify the geometry.
+
+```{r}
+seine_simp = st_simplify(seine) 
+object.size(seine)
+object.size(seine_simp)
+```
+
+Plot of the two objects:
+
+```{r}
+par(mfrow=c(1,2)) # break the plot window to 2 columns
+plot(seine, main="seine", key.pos=NULL, reset = F) # set reset to false to get two plots in the same plot window
+plot(seine_simp, main="seine_simp", key.pos=NULL, reset = F)
+par(mfrow=c(1,1))
+```
+
+### Centroids
+
+Calculates the center of mass of a spatial object, we use st_centroids() function. To ensure the points are inside the geometry of the parent object, we use st_point_on_surface() function. The two functions assumes attributes are constant over geometries of x. This means the surface is assumed to be flat without indents or bumps.
+
+```{r}
+seine_cen = st_centroid(seine)
+seine_pos = st_point_on_surface(seine)# ensures the point is inside the object
+class(seine_cen); class(seine_pos)
+```
+
+Plot of the centroid and point on surface.
+
+```{r}
+plot(seine, main="seine center", reset=F, col="grey")
+plot(seine_cen, add=T, col="red") # add=T will add to the same plot
+plot(seine_pos, add=T, col="black")
+legend("bottomleft", c("seinse_cen","seince_pos"), col=c("red","black"), pch=c(1,1))
+```
+
+### Distance between objects
+
+Compute Euclidean or great circle distance between pairs of geometries (the centroids we captured earlier in this case).
+
+```{r}
+st_distance(seine_cen[1,], seine_cen[2,])
+```
+
+### Buffer
+
+A buffer creates a polygon of a given distance around a geometric feature (point, line or polygon). 
+
+```{r}
+st_crs(seine)$units_gdal # check unit
+st_length(seine)
+seine_buff = st_buffer(seine, dist = 50000) # 50km buffer
+```
+
+Plot of the buffers with the river network in black.
+
+```{r}
+plot(seine_buff, border="white", reset=F)
+plot(seine, col="black", lwd=2,add=T)
+```
+
+### Clip operations
+
+```{r}
+seine_buff
+x = seine_buff[1,] # buffer of Marne
+y = seine_buff[2,] # buffer of Seine
+xANDy = st_intersection(x, y); plot(xANDy["name"])
+```
+
+

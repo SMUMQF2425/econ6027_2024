@@ -1,0 +1,56 @@
+
+```{r}
+################
+# 5d Solutions #
+################
+
+library(spatstat)
+
+## Activity B ##
+
+# load data (copied from the notes)
+(breach = st_read("breach.shp")) # point data
+(breach = breach[ ,-1]) # remove FID column
+st_crs(breach)$proj # breach is projected, good to go
+blocks = st_read("blocks.shp") # New Haven polygon
+table(st_is_valid(blocks)) # all valid
+isTRUE(all.equal(st_crs(breach), st_crs(blocks))) # CRS is projected and same
+
+# prep the data (copied from the notes)
+(breach.ppp = as.ppp(breach))
+nh = st_union(blocks) # Newhaven outline
+(nh.owin = as.owin(nh))
+Window(breach.ppp) = nh.owin
+table(duplicated(breach.ppp)) # many duplicated entries
+(breach.ppp = rjitter(breach.ppp, retry=T)); table(duplicated(breach.ppp))
+plot(breach.ppp, pch=20, size=0.5)
+
+# check units
+st_crs(breach)$units 
+
+# create buffer
+nh.buff = st_buffer(nh, dist=5280) # 1mile = 5250ft
+plot(st_geometry(nh.buff)); plot(breach,add=T)
+
+# window with buffer
+buff.owin = as.owin(nh.buff)
+clarkevans.test(breach.ppp, correction="guard", alternative="less", 
+                clipregion=buff.owin)
+# Notice the p-value is larger compared to the p-value without the guard region.
+# However, the R index value is the same.
+
+# Conclusion: there seem to be significant clustering of incidences related to breaches of peace.
+
+################################################################################
+
+## Activity B ##
+
+data(bramblecanes)
+clarkevans.test(bramblecanes, correction="none", alternative="less")
+clarkevans.test(bramblecanes, correction="Donnelly", alternative="less")
+# Notice how R is over-estimated when no correction is applied.
+# Also notice the difference in the p-values.
+
+# Conclusion: there is evidence of significant clustering in the bramblecanes.
+```
+

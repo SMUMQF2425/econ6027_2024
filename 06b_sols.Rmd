@@ -1,0 +1,72 @@
+
+```{r}
+################
+# 6b Solutions #
+################
+
+library(sf); library(spdep); library(tmap)
+options(scipen = 999) 
+
+# load data
+(eire = st_read(system.file("shapes/eire.shp", package="spData")))
+table(st_is_valid(eire))
+(eire_nb = poly2nb(eire))
+coords = st_point_on_surface(st_geometry(eire))
+
+tm_shape(eire) + tm_polygons() + tm_text("names") + 
+  tm_layout(main.title = "Counties of Ireland")
+
+write.nb.gal(eire_nb, "eire_nb.gal", oldstyle=F)
+
+# connect Clare and Kerry
+clare = subset(eire, names=="Clare")
+kerry = subset(eire, names=="Kerry")
+st_distance(clare,kerry)
+(eire_nb2 = poly2nb(eire, queen=T, snap=4.1))
+plot(st_geometry(eire), border="grey60", axes=T,  
+     main="Queen Contiguity with Clare & Kerry Connection in Red")
+plot(eire_nb2, coords, pch=19, cex=0.6, col="red", add=T)
+plot(eire_nb, coords, pch=19, cex=0.6, add=T)
+
+(eire_lw = nb2listw(eire_nb2)) # row normalised style
+(eire_lwB = nb2listw(eire_nb2,style="B")) # binary style
+
+# Join count analysis
+eire$pale # pale is binary
+eire$pale_factor = as.factor(eire$pale == 1)
+summary(eire$pale_factor)
+tm_shape(eire) + tm_polygons(col="pale_factor")
+joincount.multi(eire$pale_factor, listw=eire_lwB) #listw must be B style
+
+# Moran's I
+tm_shape(eire) + tm_polygons(col="A") # clustering observed
+moran.test(eire$A, listw=eire_lw)
+moran.plot(eire$A, listw=eire_lw, main="Moran scatterplot", labels=F)
+
+localm = localmoran(eire$A, listw=eire_lw)
+head(localm)
+eire$LMORANZ = localm[,4]
+tm_shape(eire) + tm_polygons(col="LMORANZ") # notice how the Zscores differ compared to 08c
+sum(localm[,1])/ sum(unlist(eire_lw$weights))
+
+# Geary's C
+geary.test(eire$A, listw=eire_lw)
+
+# Getis-Ord's G
+globalG.test(eire$A, listw=eire_lwB)
+
+localG = localG(eire$A, listw=eire_lwB)
+eire$GO_STAT = localG
+tm_shape(eire) + tm_polygons("GO_STAT")
+
+# Correlogram
+correl = sp.correlogram(neighbours=eire_nb2, var=eire$A, order=3, method="corr", style="W")
+correlI = sp.correlogram(neighbours=eire_nb2, var=eire$A, order=3, method="I", style="W")
+correlC = sp.correlogram(neighbours=eire_nb2, var=eire$A, order=3, method="C", style="W")
+par(mfrow=c(1,3))
+plot(correl, main="Contiguity lag orders: correlation")
+plot(correlI, main="Contiguity lag orders: Moran's I")
+plot(correlC, main="Contiguity lag orders: Geary's C")
+par(mfrow=c(1,1))
+```
+

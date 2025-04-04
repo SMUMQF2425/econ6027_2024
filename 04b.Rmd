@@ -1,0 +1,184 @@
+---
+title: "ECON6027_4b_updated"
+author: "Dr. Liu"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Spatial desctiptive summary measures
+
+Start by loading the packages:
+
+```{r}
+library(aspace, quietly = T); library(sf)
+```
+
+### Datasets
+
+Change working directory and load datasets. The datasets are the Singapore planning area shapefile and three more shapefiles containing the locations of the speed camera in Singapore.
+
+```{r}
+sg_regions = st_read("MP14_PLNG_AREA_WEB_PL.shp") # sg regions
+table(st_is_valid(sg_regions)) # Validity must be checked for all loaded polygons
+sg_regions = st_make_valid(sg_regions); table(st_is_valid(sg_regions))
+
+SLC = st_read("SPF_PSLC.shp") # speed laser cameras
+table(st_is_valid(SLC)) # usually points objects have valid geometry
+```
+
+CRS matters: Before we conduct summary calculations, the unit of analysis must be in a metric form so that distance calculations will be meaningful. If the dataset follows a geographic CRS (st_is_longlat() is TRUE), then you must transform the CRS to a projected CRS.
+
+```{r}
+st_crs(sg_regions)$proj
+st_crs(SLC)$proj
+isTRUE(all.equal(st_crs(sg_regions), st_crs(SLC)))
+```
+
+Both are projected with the same CRS. So, we are good to go!
+
+### Initial maps
+
+Start by creating a basemap "sg_map" and add the laser camera locations.
+
+```{r}
+library(tmap)
+(sg_map = tm_shape(sg_regions) + tm_polygons(col="REGION_N", alpha=0.5, 
+                          border.col = "grey", palette="Set2", legend.show = F))
+(LC_locations = sg_map + 
+    tm_shape(SLC) + tm_dots(size=0.1) + 
+    tm_layout(main.title="Locations of Laser Speed Cameras, Singapore", 
+              inner.margins = 0.1))
+```
+
+### Descriptive summary measures
+
+Computations using the aspace package functions can only be carried out on cartesian coordinates given in matrix form. Thus we will extract the coordinates of the speed laser camera locations of SLC.
+
+```{r}
+LC_coords = st_coordinates(SLC)
+class(LC_coords) 
+```
+
+#### Measures of central tendency
+
+Compute the mean and the median and assign it to a list object for later use.
+
+```{r}
+mean = calc_mnc(id=1, points=LC_coords)
+mean$LOCATIONS
+median = calc_mdc(id=2, points= LC_coords)
+median$LOCATIONS
+```
+
+#### SDD (standard distance disc)
+
+In the following chunk, we compute the standard distance and the output is assigned to a list object called "sdd".
+
+```{r}
+sdd = calc_sdd(id=3, calccentre = T, weighted=F, points = LC_coords)
+```
+
+In order to plot the standard distance disc using tmap, we need to convert standard distance disc contained in the list "sdd$LOCATIONS" created in the previous chunk to a sf line object.
+
+```{r}
+ls()
+(LC_sdd_line = sdd$LOCATIONS %>% st_as_sf(coords = c("x", "y"), crs=st_crs(SLC))
+    %>% st_combine() %>% st_cast("LINESTRING")) # CRS from the parent object.
+(LC_std_dist = st_sf(sdd$ATTRIBUTES, geom=st_geometry(LC_sdd_line))) 
+# create sf object by adding in the attribute data
+```
+
+#### SDE (standard deviational ellipse)
+
+Coding to generate the SDE is much similar to that of SDD above.
+
+```{r}
+sde = calc_sde(id=4, calccentre = T, weighted=F, points= LC_coords)
+```
+
+As before we convert standard deviational ellipse to sf line object to help with tmap mapping
+
+```{r}
+ls()
+(LC_sde_line = sde$LOCATIONS %>% st_as_sf(coords = c("x", "y"), crs=st_crs(SLC)) 
+  %>% st_combine() %>% st_cast("LINESTRING"))
+(LC_std_ellps = st_sf(sde$ATTRIBUTES, geom=st_geometry(LC_sde_line)))
+```
+
+#### Plot of the summary measures
+
+Create a point object with mean and median to be plotted as a separate layer. SDD and SDE will be added as additional layers. (Note the three different tm_shape layers).
+
+```{r}
+mean$LOCATIONS; median$LOCATIONS
+(mean_median = rbind(mean$LOCATIONS, median$LOCATIONS) %>% data.frame() %>% 
+  st_as_sf(coords=c("x","y"), crs=st_crs(SLC))) # matrix -> data.frame -> sf points
+mean_median$id = c("Spatial Mean","Spatial Median") # assign names
+mean_median
+LC_locations + 
+  tm_shape(LC_std_ellps) + tm_lines(lwd=2) + 
+  tm_shape(LC_std_dist) + tm_lines(lwd=2, lty=2) + 
+  tm_shape(mean_median) + tm_dots(size=0.1, shape="id", col="red", title.shape="Measures") + 
+  tm_compass() +
+  tm_add_legend(type="line", labels="SDD", lty=2) + 
+  tm_add_legend(type="line", labels="SDE", lty=1)
+```
+
+### Weighted descriptive summary measures
+
+We will use the dengue clusters as of May 2020 dataset for this analysis. The centroid of the clusters will be analysed. The weights are assigned based on the size of the cluster.
+
+```{r}
+dengue = st_read("dengue-clusters-may20.geojson") # original CRS is WGS84
+st_is_longlat(dengue)
+dengue = st_transform(dengue, crs=st_crs(sg_regions)) # align the CRS
+isTRUE(all.equal(st_crs(sg_regions), st_crs(dengue)))
+
+# Also check the validity of the geometry
+table(st_is_valid(dengue)) 
+dengue = st_make_valid(dengue); table(st_is_valid(dengue)) 
+```
+
+In the following chunk, we plot the dengue clusters on a map of Singapore.
+
+```{r}
+names(dengue)
+dengue$area = st_area(dengue) # new attribute which will be used as weights later
+summary(dengue$area)
+sg_map + 
+  tm_shape(dengue) + tm_polygons(col="area", title="Cluster size") + 
+  tm_layout(main.title = "Dengue clusters, May 2020", legend.outside = T)
+```
+
+For the purpose of computing summary measures, extract the coordinates of the center of these clusters.
+
+```{r}
+dengue_spots = st_centroid(dengue)
+dengue_coords = st_coordinates(dengue_spots) # extract coordinates from dengue_spots
+(dengue_map = sg_map + 
+  tm_shape(dengue_spots) + tm_dots() +
+  tm_layout(main.title="Locations of High Dengue Incidence, May 2020, Singapore", 
+            inner.margins = 0.1))
+```
+
+The following code chunk demonstrates how to extract weights. Note that aspace requires the coordinates to be unit free. However, ”dengue_area” is in square meters which we will remove now. (if your weights are in frequencies, you don’t have a problem.)
+
+```{r}
+(dengue_area = st_area(dengue))
+class(dengue_area)
+(dengue_area = units::drop_units(st_area(dengue)))
+class(dengue_area)
+```
+
+The measures are computed as follows (Note that the objects created in the previous section are being overwritten. If you want to create a new set of objects, change the name of the assignment):
+
+```{r}
+mean = calc_mnc(id=1, weighted = T, weights = dengue_area, points = dengue_coords)
+sdd = calc_sdd(id=2, calccentre = T, weighted = T, weights = dengue_area, points = dengue_coords)
+sde = calc_sde(id=3, calccentre = T, weighted = T, weights = dengue_area, points = dengue_coords)
+```

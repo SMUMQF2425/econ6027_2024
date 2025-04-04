@@ -1,0 +1,183 @@
+# Q3
+
+```{r}
+library(spatstat); library(sf); library(tmap); library(sp)
+
+# Load shapefiles
+nigeria <- st_read("nigeria.shp")
+nigeria
+
+malaria <- st_read("malaria.shp")
+malaria
+
+# Plot the shapefiles
+plot(st_geometry(nigeria), col = "lightgrey", main = "Nigeria map with malaria locations")
+plot(st_geometry(malaria), col = "red", pch = 16, add = TRUE)
+
+# Convert malaria data to ppp object
+malaria.sf <- st_as_sf(malaria)
+malaria.sf
+
+# Transform both to the same projected CRS
+malaria.sf <- st_transform(malaria.sf, crs = 26393)
+malaria.sf
+
+nigeria <- st_transform(nigeria, crs = st_crs(malaria.sf))
+nigeria
+
+# Check if geometries are valid after CRS transformation
+validity_check <- st_is_valid(malaria.sf)
+validity_check
+
+# If any geometries are invalid, print them
+if (any(!validity_check)) {
+  cat("Invalid geometries found:\n")
+  print(malaria.sf[!validity_check, ])
+} else {
+  cat("All geometries are valid.\n")
+}
+
+validity_check <- st_is_valid(nigeria)
+validity_check
+
+# If any geometries are invalid, print them
+if (any(!validity_check)) {
+  cat("Invalid geometries found:\n")
+  print(nigeria[!validity_check, ])
+} else {
+  cat("All geometries are valid.\n")
+}
+
+# Convert Nigeria geometry to owin
+nigeria.owin <- as.owin(st_geometry(nigeria))
+
+# Convert malaria points to ppp
+malaria.ppp <- as.ppp(st_geometry(malaria.sf), W = nigeria.owin)
+
+# Check the point pattern structure
+summary(malaria.ppp)
+
+###################################
+# QUADRAT COUNT ANALYSIS (QCA)    #
+###################################
+
+# Perform quadrat count analysis
+qc <- quadratcount(malaria.ppp, nx = 10, ny = 10)
+plot(qc, main = "Quadrat count analysis")
+quad.test <- quadrat.test(malaria.ppp, nx = 10, ny = 10)
+quad.test
+
+# Plot observed vs. expected counts
+qc.data <- data.frame(qc)
+qc.table <- data.frame(table(qc.data$Freq))
+qc.table[, 1] <- as.numeric(levels(qc.table[, 1]))
+qc.table$O_pr <- qc.table[, 2] / sum(qc.table[, 2])
+lambda <- mean(qc.data$Freq)
+qc.table$E_pr <- dpois(qc.table[, 1], lambda = lambda)
+
+plot(c(0, max(qc.table[, 1]) + 1), c(0, max(qc.table$O_pr) + 0.1), type = "n", 
+     xlab = "Number of incidents", ylab = "Frequency",
+     main = "Observed vs expected (Poisson)")
+lines(qc.table[, 1], qc.table$E_pr, col = "blue", type = "b", pch = 16)
+lines(qc.table[, 1], qc.table$O_pr, col = "red", type = "b", pch = 16)
+
+###################################
+# KERNEL DENSITY ESTIMATION (KDE) #
+###################################
+
+# Perform kernel density estimation with various bandwidths
+kde1 <- density(malaria.ppp, sigma = bw.scott(malaria.ppp))
+kde2 <- density(malaria.ppp, sigma = bw.diggle(malaria.ppp))
+kde3 <- density(malaria.ppp, sigma = bw.CvL(malaria.ppp))
+kde4 <- density(malaria.ppp, sigma = bw.ppl(malaria.ppp))
+
+# Plot density estimates
+par(mfrow = c(2, 2))
+plot(kde1, main = "KDE: Scott's rule")
+plot(kde2, main = "KDE: Diggle's method")
+plot(kde3, main = "KDE: CvL method")
+plot(kde4, main = "KDE: PPL method")
+par(mfrow = c(1, 1))
+
+#########################################
+# NEAREST NEIGHBOUR DISTANCE ANALYSIS   #
+#########################################
+
+# Compute nearest neighbour distances
+nnd <- nndist(malaria.ppp)
+summary(nnd)
+
+# Histogram of nearest neighbour distances
+hist(nnd, main = "Nearest neighbour distance distribution",
+     xlab = "Distance", col = "lightblue")
+
+# Performing Clark-Evans test with no correction is highly discouraged as it ignores edge effects, which can bias our conclusions in non-rectangular windows. Hence, we use the cdf and guard corrections instead.
+
+# Perform Clark-Evans test with cdf correction
+clarkevans.test(malaria.ppp, correction = "cdf", clipregion = nigeria.owin, alternative = "clustered")
+
+# Perform Clark-Evans test with guard correction
+clarkevans.test(malaria.ppp, correction = "guard", clipregion = nigeria.owin, alternative = "clustered")
+
+###################################
+# K-FUNCTION AND G-FUNCTION TESTS #
+###################################
+
+# Plot results
+kf = envelope(malaria.ppp, Kest, correction="best", alternative="greater")
+
+gf = envelope(malaria.ppp, Gest, correction="best", alternative="greater")
+
+par(mfrow=c(1,2))
+plot(kf, main="K-function")
+
+# Plot the G-function with confidence intervals manually
+plot(gf$r, gf$obs, type = "l", col = "red", lwd = 2,
+     xlab = "Distance (r)", ylab = "G(r)", main = "G-function")
+lines(gf$r, gf$theo, col = "blue", lwd = 2, lty = 2)
+lines(gf$r, gf$lo, col = "grey", lty = 3)
+lines(gf$r, gf$hi, col = "grey", lty = 3)
+
+# Add legend
+legend("bottomright", legend = c("Observed G(r)", "Theoretical G(r)", "Confidence bounds"), col = c("red", "blue", "grey"), lwd = c(2, 2, 1), lty = c(1, 2, 3))
+par(mfrow=c(1,1))
+# Significant clustering present
+```
+
+### Interim conclusions
+
+1. Quadrat count analysis (QCA)
+
+- Observation: The quadrat test indicated significant deviation from Complete Spatial Randomness (CSR). The observed counts differ significantly from the expected Poisson distribution, especially in regions with counts 0, 1, and 2.
+
+- Conclusion: This indicates that the malaria prevalence locations exhibit spatial clustering, rejecting the hypothesis of CSR.
+
+2. Kernel density estimation (KDE)
+
+- Observation: KDE with various bandwidth selection methods consistently reveals hotspots of malaria prevalence. The Scott’s and PPL methods identify more localised clusters, while Diggle's and CvL methods highlight smoother density surfaces.
+
+- Conclusion: The malaria occurrences are not uniformly distributed but instead exhibit concentrated clusters of higher density, particularly in specific regions of Nigeria.
+
+3. Nearest neighbour distance analysis
+
+- Observation: The nearest neighbour distances show a skewed distribution towards smaller distances. The Clark-Evans test with edge corrections confirms significant clustering in the malaria dataset.
+
+- Conclusion: The clustering of malaria occurrences is supported by the nearest neighbour analysis, providing strong evidence against randomness.
+
+4. K-function and G-function
+- Observation: The $K$-function demonstrates that observed clustering exceeds the expected random clustering for most distance scales. The $G$-function confirms clustering at short distances.
+- Conclusion: The malaria prevalence dataset exhibits significant clustering at both local and larger spatial scales, as evidenced by the $K$- and $G$-functions.
+
+### Overall conclusion
+
+The comprehensive point pattern analysis of malaria prevalence locations in Nigeria reveals significant clustering at multiple spatial scales. Key findings include:
+
+1. The quadrat count analysis strongly rejects the null hypothesis of CSR, highlighting clustering in malaria occurrences.
+
+2. Kernel density estimation identifies specific hotspots with high malaria prevalence.
+
+3. Nearest neighbour analysis further substantiates clustering, with smaller average distances than expected under randomness.
+
+4. The $K$- and $G$-functions confirm significant clustering patterns across varying spatial scales.
+
+These results have practical implications for targeted interventions, suggesting that resources for malaria prevention and control should prioritise identified hotspot regions. Edge corrections ensured the robustness of these conclusions, minimising biases due to non-rectangular study areas.

@@ -1,0 +1,160 @@
+
+```{r}
+#####################
+# Introduction to R #
+#####################
+
+# you can use R as a calculator
+-5+-4
+
+###############################################################################
+# 1. Variables and Assignment
+
+# Simple assignment
+x <- 5 # it is also possible to use "=" sign to make assignments.
+y <- 4
+x + y
+z <- x + y
+z
+sqrt(z)
+
+# Vector assignment 
+tree.heights <- c(4.3,7.1,6.3,5.2,3.2,2.1)
+tree.heights
+tree.heights**2 # square of elements 
+tree.heights^2 # square of elements 
+sum(tree.heights)
+mean(tree.heights)
+max.height <- max(tree.heights)
+max.height
+tree.heights [1]    # first element
+sqrt(tree.heights[1:3]) #square roots of the subset
+tree.heights[c(5,3,2)]  # a subset of elements 5,3,2: note the ordering
+
+# Character Variable assignment
+name <- "Your Name" 
+name
+cities <- c("Singapore","Tokyo","Beijing","Mumbai","Colombo")
+cities
+length(cities)
+country <- c(TRUE, FALSE, FALSE, FALSE, FALSE)
+country
+cities[country]
+
+###############################################################################
+# 2. Data Types and Data Classes
+
+# type: numerical
+numeric(5)
+is.numeric(tree.heights)
+as.numeric(c("9", "August", "2022"))
+
+# type: logical
+logical(5)
+as.logical(c("TRUE", "T", "True", "true"))
+as.logical(c("FALSE", "F", "False", "false"))
+as.logical(c(7, 5, 0, -4,5)) # 0 is false, any other value is true
+
+is.numeric(country) # country is not a numeric vector
+is.logical(country) 
+
+large <- (tree.heights>5)
+large
+tree.heights[large]
+sum(tree.heights[large])
+
+# type: character
+character(5)
+class(cities)
+is.character(cities)
+is.character(country) # country is a logical vector
+
+# Data classes
+# The different data types can be used to populate different data structures known as “classes”.
+class(tree.heights)
+class(cities)
+class(large)
+
+# POPULAR CLASSES
+
+# class: data.frame
+my.data <- data.frame(a=10:15, b=15:20) # create data frame
+my.data
+class(my.data)
+
+# class: vector
+is.vector(my.data)
+as.vector(my.data)
+
+# class: matrix
+my.matrix <- matrix(1:6, ncol = 2)
+class(my.matrix)
+colnames(my.matrix) <- c("c1", "c2") # assign column names
+rownames(my.matrix) <- c("r1", "r2","r3") # assign row names
+my.matrix
+rowSums(my.matrix) # https://www.statmethods.net/advstats/matrix.html 
+
+# class: factor (useful to create specific categories)
+house.type <- factor(c("Bungalow", "Flat", "Flat", "Detached", "Flat", "Terrace", "Terrace"), levels=c("Bungalow","Flat","Detached","Semi","Terrace"))
+house.type
+class(house.type)
+table(house.type) # tables can be used to summaries
+
+# class: ordered factor
+income <-ordered(c("High", "High", "Low", "Low", "Low", "Medium", "Low", "Medium"), levels=c("Low", "Medium", "High"))
+class(income)
+income > "Low"
+
+# class: list (combine many different classes together)
+my.list <- list("Singapore", c(2019,2020,2021), "inflation.pct", matrix(c(0.57,-0.18, 2.3),c(1,3)))
+my.list
+my.list[[3]] # select an element from the list
+my.list <- list(country="Singapore", year=c(2019,2020,2021), indicator="inflation.pct", value=matrix(c(0.57,-0.18, 2.3),c(1,3)))
+my.list # assigned names to the list items
+
+# If you are new to R, it is ok to be a little bit confused at this point. You will understand more as we proceed.
+# If are are feeling exhausted, take a break!
+
+###############################################################################
+# 3. data.frames vs. tibbles
+
+# create data.frame
+L3 <- LETTERS[1:3] # create an object consisting of A, B & C
+fac <- sample(L3, 10, replace = TRUE) # generate a sample of size 10 from L3 with replacement
+df <- data.frame(x = 1, y = 1:10, fac = fac) # create a dataframe with three attributes: x, y, & fac
+df
+df$y # extract column y
+
+# load "trees" dataset
+data("trees")
+head(trees) # view the top 6 entries af the dataset
+
+# create tibble
+library(tibble)
+tb = tibble(x = 1, y = 1:10, fac = fac)
+
+# a. versatile
+class(tb)
+
+# b. partial matching
+df$f
+tb$f
+
+# c. subsetting
+class(df[,2]) # class of column 2 in df
+class(tb[,2])
+
+# convert data.frame to tibble
+trees.tb <- as_tibble(trees)
+class(trees.tb)
+
+trees.tb # returns only the top 10 entries
+trees # returns all the entries. Imagine if you have 10,000 entries!
+head(trees)
+
+###############################################################################
+# 4. Basic Plots
+
+plot(trees$Girth, trees$Height, col="red", main="Girth vs. Height of Trees")
+```
+

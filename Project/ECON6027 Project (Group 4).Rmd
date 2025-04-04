@@ -1,0 +1,390 @@
+---
+title: "ECON6027 Project (Group 4)"
+author: "Chan Ric (MQF), May Wong Yu Xian (MSE), Gu Pei Yao (MSE)"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+In this project, we aim to conduct a comprehensive point pattern analysis of MRT and LRT exits in Singapore. This involves examining the spatial distribution of these public transport exits, using a variety of techniques such as spatial descriptive summary measures, quadrat count analysis, kernel density estimation, nearest neighbour analysis, and the K-function. These methods will help us understand the degree of clustering or dispersion of exits across Singapore and evaluate the public transportation network's effectiveness in serving different regions. To do this, we import the following libraries⁠ to handle spatial data, perform calculations, and visualise the results:
+
+```{r}
+library(aspace, quietly = T)
+library(sf, quietly = T)
+library(tmap, quietly = T)
+library(spatstat, quietly = T)
+library(ggplot2, quietly = T)
+library(dplyr, quietly = T)
+library(geojsonsf, quietly = T)
+library(geojsonR, quietly = T)
+```
+
+We start by loading the shapefile of Singapore planning areas from [data.gov.sg](https://data.gov.sg/datasets?query=master+plan+2014&page=1&resultId=d_6d6fd6505f23d7fb90dec567afd555bb) and the geojson file of MRT and LRT exits from [data.gov.sg](https://data.gov.sg/datasets?query=mrt&page=1&resultId=d_b39d3a0871985372d7e1637193335da5).
+
+```{r}
+sg_regions = st_read("MP14_PLNG_AREA_WEB_PL.shp")
+sg_regions = st_transform(sg_regions, crs=3414)
+table(st_is_valid(sg_regions)) # there are 5 false entries
+sg_regions = st_make_valid(sg_regions)
+table(st_is_valid(sg_regions)) # now, all 55 entries are valid
+
+mrt_lrt_exits = geojson_sf("LTAMRTStationExitGEOJSON.geojson")
+mrt_lrt_exits_sf = st_transform(mrt_lrt_exits, crs=3414)
+table(st_is_valid(mrt_lrt_exits_sf)) # all entries are valid
+st_crs(mrt_lrt_exits_sf)$proj4string
+isTRUE(all.equal(st_crs(sg_regions), st_crs(mrt_lrt_exits_sf))) # TRUE, we can proceed
+table(is.na(mrt_lrt_exits_sf$geometry)) # no station exits with empty coordinates 
+
+sg_map_bg = tm_shape(sg_regions) +
+  tm_polygons(alpha=0.5, border.col="black", legend.show=F) +
+  tm_fill(col = "white") + 
+  tm_scale_bar(position = c("right", "bottom"), width = 0.25, text.size = 0.4) +
+  tm_compass(position = c("left", "top"), size = 0.8, text.size = 0.7)
+```
+
+## 1. Spatial descriptive summary measures
+Computations using the aspace package functions can only be carried out on Cartesian coordinates given in matrix form. Thus, we will extract the coordinates of MRT and LRT exits.
+
+```{r}
+mrt_coords = st_coordinates(mrt_lrt_exits_sf)
+mrt_coords = st_zm(mrt_coords, drop = T, what = "ZM")
+class(mrt_coords)
+```
+
+Measures of central tendency: We compute the mean and the median and assign them to a list object for later use.
+
+```{r}
+mean_mrt = calc_mnc(id=1, points=mrt_coords)
+mean_mrt$LOCATIONS
+median_mrt = calc_mdc(id=2, points=mrt_coords)
+median_mrt$LOCATIONS
+```
+
+In the following chunk, we compute the standard deviation distance and ellipse of MRT and LRT exits in Singapore. 
+
+```{r}
+sdd_mrt = calc_sdd(id=3, calccentre=T, weighted=F, points = mrt_coords)
+sde_mrt = calc_sde(id=4, calccentre=T, weighted=F, points = mrt_coords)
+
+mrt_sdd_line = sdd_mrt$LOCATIONS %>% 
+  st_as_sf(coords = c("x", "y"), crs=st_crs(mrt_lrt_exits_sf)) %>% 
+  st_combine() %>% 
+  st_cast("LINESTRING")
+mrt_std_dist = st_sf(sdd_mrt$ATTRIBUTES, geom=st_geometry(mrt_sdd_line))
+
+mrt_sde_line = sde_mrt$LOCATIONS %>% 
+  st_as_sf(coords = c("x", "y"), crs=st_crs(mrt_lrt_exits_sf)) %>% 
+  st_combine() %>% 
+  st_cast("LINESTRING")
+mrt_std_ellps = st_sf(sde_mrt$ATTRIBUTES, geom=st_geometry(mrt_sde_line))
+
+mean_mrt$LOCATIONS; median_mrt$LOCATIONS # identify mean and median location, ID 1 is mean and ID 2 is median
+mean_median = rbind(mean_mrt$LOCATIONS, median_mrt$LOCATIONS) %>% data.frame() %>% 
+  st_as_sf(coords=c("x","y"), crs=st_crs(mrt_lrt_exits_sf))
+mean_median$id = c("Spatial mean","Spatial median")
+
+sg_map_bg + 
+  tm_shape(mrt_lrt_exits_sf) + tm_dots(size=0.1, col= "blue") +
+  tm_shape(mrt_std_ellps) + tm_lines(lwd=2) + 
+  tm_shape(mrt_std_dist) + tm_lines(lwd=2, lty=2) + 
+  tm_shape(mean_median) + tm_dots(size=0.1, shape="id", col="red", title.shape="Measures") +
+  tm_add_legend(type="line", labels="SDD", lty=2, ) + 
+  tm_add_legend(type="line", labels="SDE", lty=1)
+```
+
+## 2. Quadrat count analysis
+
+```{r}
+mrt.ppp = as.ppp(mrt_lrt_exits_sf$geometry) # transform sf object to ppp
+st_bbox(mrt_lrt_exits_sf)
+```
+
+```{r}
+sg = st_union(sg_regions) 
+sg.owin = as.owin(sg)
+class(sg.owin)
+Window(mrt.ppp) = sg.owin 
+mrt.ppp # 563 points, no points out of the boundary
+
+table(duplicated(mrt.ppp)) # no duplicated entries, we can proceed
+
+qc_mrt = quadratcount(mrt.ppp, nx=10, ny=10)
+class(qc_mrt)
+plot(qc_mrt)
+```
+
+$\chi^2$ (goodness of fit) test
+
+```{r}
+quad.test_mrt = quadrat.test(mrt.ppp, nx=10, ny=10)
+```
+
+Test outcome: p-value < 2.2e-16, reject the null at 5% level.
+
+Quadrat count analysis is used to detect spatial patterns by dividing the study area into equally sized squares (quadrats) and counting the number of points within each quadrat. This method helps determine if the spatial distribution is random, clustered, or uniform. In our analysis, the MRT/LRT exits across Singapore were treated as a point pattern. The study area was divided into a 10x10 grid using the quadratcount() function from the spatstat package, resulting in 100 quadrats across Singapore. We observed that some quadrats had very few or no points, while others had many. For example, in the northern part of Singapore, several quadrats contained no points, while in the central region, quadrats contained higher numbers of exits, such as quadrats with up to 66 points. To statistically evaluate the distribution, we performed a $\chi^2$ goodness-of-fit test using quadrat.test(). The test compares the observed counts in each quadrat to the expected counts under the assumption of complete spatial randomness (CSR). The p-value from our test was < 2.2e-16, meaning the distribution of MRT/LRT exits was significantly different from random. This strongly suggests spatial clustering, meaning the exits are more concentrated in certain areas (like the city centre) than in others (like the outskirts). From our analysis, we conclude that the MRT/LRT exits are not uniformly distributed across Singapore, with clear clustering in central regions, suggesting that station exits are concentrated in areas with greater activity or population density.
+
+## 3. Kernel density estimation
+
+```{r}
+plot(density(mrt.ppp, sigma=500))
+plot(density(mrt.ppp, sigma=1000))
+
+mrt.bw1 = bw.diggle(mrt.ppp)
+mrt.kde1 = density(mrt.ppp, sigma=mrt.bw1)
+plot(mrt.kde1)
+
+mrt.bw2 = bw.ppl(mrt.ppp)
+mrt.kde2 = density(mrt.ppp, sigma=mrt.bw2)
+plot(mrt.kde2)
+
+mrt.bw3 = bw.scott(mrt.ppp)
+mrt.kde3 = density(mrt.ppp, sigma=mrt.bw3)
+plot(mrt.kde3)
+
+mrt.bw4 = bw.CvL(mrt.ppp)
+mrt.kde4 = density(mrt.ppp, sigma=mrt.bw4)
+plot(mrt.kde4)
+
+mrt.bw5 = bw.frac(mrt.ppp)
+mrt.kde5 = density(mrt.ppp, sigma=mrt.bw5)
+plot(mrt.kde5)
+```
+
+KDE is a smoothing technique that estimates the density of points (MRT/LRT exits in this case) across the study area. It provides a continuous surface showing areas of high and low point intensity. Bandwidth is a critical parameter in KDE, as it controls the smoothness of the resulting density surface. A small bandwidth creates a highly localised surface, while a larger bandwidth creates a broader, smoother surface.
+
+In our project, we tested several bandwidth selection methods:
+- Fixed bandwidth (sigma = 500 and sigma = 1000): These produced different degrees of smoothing. A smaller bandwidth (500 m) highlighted specific clusters, while a larger bandwidth (1000 m) produced a smoother surface, showing more generalised areas of concentration.
+- Adaptive bandwidth: We also used data-driven methods like bw.diggle, bw.ppl, and bw.scott, which adapt the bandwidth based on the data. These methods ensure that the bandwidth is optimal for revealing the true underlying density of exits.
+
+The KDE plots (e.g., density(mrt.ppp, sigma=500)) showed high-density regions in the central parts of Singapore, particularly around areas like Orchard, Newton, and Downtown Core. These regions had the highest concentration of MRT/LRT exits. Areas with fewer exits showed lower densities, confirming that the exits are not evenly distributed. Based on our KDE analysis, we can confirm that certain areas, especially the central business district and key residential areas, have a higher intensity of station exits, corresponding with the city’s urban structure and population distribution.
+
+## 4. Nearest neighbour distance analysis
+
+```{r}
+clarkevans(mrt.ppp, correction="none") # calculated index values less than 1 (r = 0.1399807)
+clarkevans.test(mrt.ppp, correction="none", alternative="less")
+
+mrt_lrt_exits_sf.ppp <- as.ppp(st_geometry(mrt_lrt_exits_sf))
+
+mrt_lrt_exits_sf.nnd1 <- nndist(mrt_lrt_exits_sf.ppp, k=1)
+summary(mrt_lrt_exits_sf.nnd1)
+
+mrt_lrt_exits_sf.nnd2 = nndist(mrt_lrt_exits_sf.ppp, k=2)
+mrt_lrt_exits_sf.nnd3 = nndist(mrt_lrt_exits_sf.ppp, k=3)
+mrt_lrt_exits_sf.nnd4 = nndist(mrt_lrt_exits_sf.ppp, k=4)
+mrt_lrt_exits_sf.nnd5 = nndist(mrt_lrt_exits_sf.ppp, k=5)
+
+par(mfrow = c(2,3))
+hist(mrt_lrt_exits_sf.nnd1)
+hist(mrt_lrt_exits_sf.nnd2)
+hist(mrt_lrt_exits_sf.nnd3)
+hist(mrt_lrt_exits_sf.nnd4)
+hist(mrt_lrt_exits_sf.nnd5)
+
+mean(mrt_lrt_exits_sf.nnd1)
+```
+
+#### Histogram analysis
+
+##### Overall distribution
+The histograms indicate that the nearest neighbour distances across the different nearest neighbour analyses (nnd1 to nnd5) are predominantly concentrated at lower distance ranges. This suggests that many MRT/LRT exits are located relatively close to one another.
+
+##### nnd1 (1st nearest neighbour)
+The histogram shows a sharp peak at very short distances (0 to around 200 m). Most of the exits are clustered closely together, with a few outliers extending towards longer distances (up to about 1200 m). This indicates a high level of accessibility for most exits.
+
+##### nnd2 (2nd nearest neighbour)
+Similar to nnd1, there is a significant concentration of exits within the first 1000 m, with fewer exits further away. The distribution appears to flatten out as distances increase.
+
+##### nnd3 (3rd nearest neighbour)
+The histogram continues to show a peak in the lower distance range (0 to 500 m). The drop-off is similar to previous plots, but it indicates that while the first few neighbours are often close, the distances to the third nearest neighbours begin to show a larger variation, implying some exits are farther apart at this level.
+
+##### nnd4 (4th nearest neighbour)
+There is a noticeable increase in frequency for distances around 1 km, with more entries appearing in the higher distance categories. This suggests that as we consider more distant neighbours, the exits are increasingly spread out.
+
+##### nnd5 (5th nearest neighbour)
+The histogram shows an even broader distribution, with frequencies across multiple distance categories extending beyond 1000 m. This reflects a diminishing density of nearby exits as we move further from a given exit, highlighting that the 5th nearest neighbour can be relatively far away.
+
+#### Conclusion
+1. Clustering of MRT/LRT exits
+
+The results indicate that MRT/LRT exits tend to cluster together in certain areas, especially within the first 1 km. This clustering can enhance public transportation accessibility for those living or working nearby.
+
+2. Accessibility patterns
+
+Areas with high frequencies of nearby exits (especially in the nnd1 and nnd2 plots) suggest better public transport service. These areas may be more attractive for residential or commercial development due to the ease of access to public transport.
+
+3. Transport planning opportunities
+
+The significant distances found in the later neighbour analyses (nnd4 and nnd5) suggest potential gaps in service in some areas. This could inform transport planning decisions, such as where to invest in new MRT/LRT lines or additional services.
+
+4. Identifying service gaps
+
+The longer distances in the higher neighbour analyses indicate areas that may lack sufficient public transport access. Stakeholders can use this information to explore options for improving connectivity, such as extending services or enhancing feeder bus routes in these areas.
+
+Nearest neighbour distances map
+
+```{r}
+nearest_neighbour_distances <- nndist(mrt_lrt_exits_sf.ppp, k=1)
+mrt_lrt_exits_sf$nearest_neighbour_distances <- nearest_neighbour_distances
+
+tm_shape(sg_regions) +
+  tm_polygons() +
+  tm_shape(mrt_lrt_exits_sf) +
+  tm_dots(col = "nearest_neighbour_distances", palette = "-RdYlBu", size = 0.05, title = "Nearest neighbour distance") +
+  tm_layout(main.title = "Nearest neighbour distances of MRT/LRT Exits", title.size = 0.75, legend.outside = T)
+```
+
+#### Key observations
+Clustering in central regions: The majority of MRT/LRT exits are clustered in the central regions of Singapore, which aligns with higher urban density and areas of greater public transportation demand.
+
+Varied distances across the island: The colour legend shows distances between nearest neighbours. The majority of exits fall within the 0-200 m range (represented by blue dots). This suggests that most MRT/LRT exits are quite close to each other, particularly in high-density areas.
+
+Service gaps: The red dots, representing distances of 1.2-1.4 km between neighbouring exits, suggest potential gaps in transport accessibility. These areas may have fewer MRT/LRT stations, potentially indicating opportunities for future infrastructure development.
+
+## 5. K-function
+
+```{r}
+mrt_lrt_exits_sf.kf = Kest(mrt_lrt_exits_sf.ppp, correction="none")
+plot(mrt_lrt_exits_sf.kf, main="K-function")
+par(mfrow = c(1,3))
+mrt_lrt_exits_sf.kfenv = envelope(mrt_lrt_exits_sf.ppp, Kest, correction="none")
+plot(mrt_lrt_exits_sf.kfenv, 
+     main = "K-function")
+mrt_lrt_exits_sf.lfenv = envelope(mrt_lrt_exits_sf.ppp, Lest, correction="none") 
+plot(mrt_lrt_exits_sf.lfenv, 
+     main = "L-function")
+mrt_lrt_exits_sf.gfenv = envelope(mrt_lrt_exits_sf.ppp, Gest, correction="none") 
+plot(mrt_lrt_exits_sf.gfenv, 
+     main = "G-function")
+```
+
+1. K-function (Spatial clustering or dispersion)
+The black line is above the red line, suggesting clustering. The further above the red line the black line is, the stronger the clustering.
+
+2. L-function (Transformed K-function)
+If the black line lies above the red dashed line, it indicates clustering; if below, it indicates dispersion.
+In this plot, the black line is consistently above the red dashed line, reaffirming the clustering behavior observed in the K-function plot.
+
+3. G-function (Nearest neighbour distribution)
+The black line is almost entirely above the red line, meaning that the points (MRT/LRT exits) are closer to each other than expected under CSR. This suggests that the points are clustered rather than dispersed. The steep rise of the G-function at small distances further supports the presence of clustering.
+
+Overall analysis
+
+Clustering: The results from all three functions (K, L, and G) consistently indicate clustering of MRT/LRT exits. The points are more likely to be close to each other than would be expected under random placement.
+
+Significance: The observed patterns exceed the confidence envelopes in certain areas, meaning that the clustering is statistically significant and not due to random variation.
+
+This analysis suggests that MRT/LRT exits tend to cluster, possibly around areas of high demand or dense urban environments, rather than being randomly or uniformly distributed across the spatial region.
+
+## 6. Real world analysis
+Patching in population density by planning areas from [singstat.gov.sg](https://www.singstat.gov.sg/find-data/search-by-theme/population/geographic-distribution/latest-data). An area of consideration could be whether there are enough MRT/LRT in each planning area for residents of Singapore. This can be visualised by adding a layer of population density onto the Singapore planning area map with the MRT/LRT exit points.
+
+```{r}
+population_pa = read.csv("residentpopulation_2024.csv")
+population_sf = inner_join(population_pa, sg_regions)
+population_sf = st_as_sf(population_sf) 
+population_sf = st_transform(population_sf, 3414) %>% st_cast()
+isTRUE(all.equal(st_crs(sg_regions), st_crs(population_sf))) #TRUE
+population_sf$resident_2024_int = as.numeric(gsub(",", "", population_sf$resident_2024))
+
+population_density = 
+  tm_shape(population_sf) + 
+  tm_borders(col="black", lwd=1, lty=1) +
+  tm_fill("resident_2024_int", lty=3, palette = "Blues") +
+  tm_scale_bar(position = c("right", "bottom")) +
+  tm_compass(position = c("left", "top"), size = 0.8, text.size = 0.7) + 
+  tm_layout(main.title = "Population density map", legend.outside = T) + tm_text("PLN_AREA_N", size = 0.25)
+
+mrt = population_density + tm_shape(mrt_lrt_exits_sf) + 
+  tm_dots(col = "deeppink", size=0.01) +
+  tm_layout(main.title = "MRT and LRT exits against population density map", legend.outside = T, main.title.size = 0.7)
+mrt # save as image: width = 2000, height = 1000 as SVG 
+```
+
+From the map, we can see that there is a clustering of MRT/LRT stations at the central region with areas such as Newton, Orchard, River Valley, Downtown Core, Rochor and Outram despite the low population density. This is probably due to the region being the Central Business District of Singapore, with a high concentration of employment in the area.
+
+To confirm this theory, we can plot another map against the workplace planning area density. The data for population workplace planning area was found from [singstat.gov.sg](https://tablebuilder.singstat.gov.sg/table/CT/17585). 
+
+```{r}
+work_pa = read.csv("workplace_pa_travel.csv")
+work_sf = inner_join(work_pa, sg_regions)
+work_sf = st_as_sf(work_sf) 
+work_sf = st_transform(work_sf, 3414) %>% st_cast()
+isTRUE(all.equal(st_crs(sg_regions), st_crs(work_sf))) #TRUE
+work_sf$workplace_int = as.numeric(gsub(",", "", work_sf$Total))
+
+workplace_density = 
+  tm_shape(work_sf) + 
+  tm_borders(col="black", lwd=1, lty=1) +
+  tm_fill("workplace_int", lty=3, palette = "Blues", breaks = c(0, 25000, 50000, 75000, 100000, 125000, 150000, 200000, 250000, 300000)) +
+  tm_scale_bar(position = c("right", "bottom")) +
+  tm_compass(position = c("left", "top"), size = 0.8, text.size = 0.7) + 
+  tm_layout(main.title = "Working population density map", legend.outside = T) + tm_text("PLN_AREA_N", size = 0.25)
+
+mrt_work = workplace_density + tm_shape(mrt_lrt_exits_sf) + 
+  tm_dots(col = "coral", size=0.01) +
+  tm_layout(main.title = "MRT and LRT exits against workplace density map", legend.outside = T, main.title.size = 0.7)
+mrt_work
+```
+
+We can see that with the combination of the residency population density and workplace population density, it gives us a better picture of how the Singapore government make plans for the buiding of MRT/LRT stations. The second map "mrt_work" showed how despite low residency population in the core central area, there is a high concentration of employees working in such areas. Hence, the planning of MRT/LRT in Singapore is sound, encompassing both ideas of residency population density and workplace population density.
+
+Additional analysis: To confirm the connectivity of the MRT/LRT lines in Singapore, I utilised another dataset from [data.gov.sg](https://data.gov.sg/datasets?query=mrt&page=1&resultId=d_222bfc84eb86c7c11994d02f8939da8d). This dataset shows the rail line connectivity of the stations. 
+
+```{r}
+mrt_2019 = geojson_sf("MasterPlan2019RailLinelayer.geojson")
+mrt_2019_sf = st_transform(mrt_2019, crs=3414)
+table(st_is_valid(mrt_2019_sf)) # all entries are valid
+st_crs(mrt_2019_sf)$proj4string
+isTRUE(all.equal(st_crs(sg_regions), st_crs(mrt_2019_sf))) # TRUE, we can proceed
+table(is.na(mrt_2019_sf$geometry)) # no station with empty coordinates
+sg_map_bg + tm_text("PLN_AREA_N", size = 0.25) + tm_shape(mrt_2019_sf) + tm_lines(col = "lawngreen")
+```
+
+From this map, we can see that while most of Singapore is pretty well connected via MRT/LRT, if there are future plans to develop the "Western Water Catchment" and "Lim Chu Kang" areas, there will be a need to further develop the rail lines in this areas to improve the connectivity. However, at this moment, these areas are used by the Singapore Armed Forces for live-firing training purposes, hence it is apt that there is low connectivity to the area to ensure low exposure to danger for the general public. 
+
+Another potential analysis could be a point analysis to check the distance analysis from a particular location to MRT/LRT stations. An example would be, if I am a potential buyer of a flat, I would want to see whether there are any nearby station exits to ensure MRT/LRT accessibility at my planned purchase location. 
+
+For example, I want to buy a flat at 760 PASIR RIS STREET 71 its coordinates in EPSG:4326 WGS 84 is 1.3764003,103.9335398 [source](https://www.onemap.gov.sg/). However, our maps are using CRS=3414, a localised Singapore coordinates system. Hence, I need to convert the coordinates to that of CRS = 3414. I transformed the coordinates via [epsg.io](https://epsg.io/transform#s_srs=3414&t_srs=4326&ops=8886&x=NaN&y=NaN). 
+
+```{r}
+flat = st_point(c(39153.3835467841, 39821.10189171739))
+flat_point = st_sfc(flat)
+attr = data.frame(Name="Intended flat purchase location")
+flat_sf = st_sf(attr, geom = flat_point, crs = 3414)
+st_crs(flat_sf)$proj
+isTRUE(all.equal(st_crs(sg_regions), st_crs(mrt_lrt_exits_sf), st_crs(flat_sf)))
+
+buffer = st_buffer(flat_sf, dist=1000)
+tmap_leaflet(tm_shape(flat_sf) + tm_dots(col="pink") + 
+  tm_shape(buffer) + tm_borders(col = "blue") + tm_shape(mrt_lrt_exits_sf) + tm_dots())
+```
+
+If I were to proceed with the purchase of this flat, I will need to consider other modes of public transportation (for example, bus) as there are no immediate MRT/LRT station exits within 1 km. If having an MRT/LRT within walking distance is my top priority. This flat location will not be ideal.
+
+If MRT/LRT accessibility is my top priority, I will need to purchase a flat in a location such as at 1D CANTONMENT ROAD THE PINNACLE @ DUXTON. Within 1 km, there are many different MRT/LRT station exits. There are even station exits within 500 m of the flat.
+
+```{r}
+flat2 = st_point(c(28908.94658009494, 28820.880891462275))
+flat_point2 = st_sfc(flat2)
+attr = data.frame(Name="Intended flat purchase location")
+flat_sf2 = st_sf(attr, geom = flat_point2, crs = 3414)
+st_crs(flat_sf2)$proj
+isTRUE(all.equal(st_crs(sg_regions), st_crs(mrt_lrt_exits_sf), st_crs(flat_sf2)))
+
+buffer2 = st_buffer(flat_sf2, dist=1000)
+buffer2a = st_buffer(flat_sf2, dist=500)
+tmap_leaflet(tm_shape(flat_sf2) + tm_dots(col="pink") + 
+               tm_shape(buffer2) + tm_borders(col = "blue") + 
+               tm_shape(buffer2a) + tm_borders(col = "cadetblue") + 
+               tm_shape(mrt_lrt_exits_sf) + tm_dots())
+```
+
+Our real world analysis could be useful for flat buyers, using the combination of our residency density analysis together with the point pattern analysis of station exits. For example, if a flat buyer want to stay somewhere more peaceful, they can consider moving to areas such as Jurong East where there is decent MRT/LRT accessibility and avoid areas that are highly populated such as Bedok, Jurong West and Tampines.
+
+#### Conclusion
+Overall, the point pattern analysis reveals significant clustering of MRT and LRT exits in Singapore, particularly around central regions such as Orchard, Newton, and Downtown Core. This clustering aligns with areas of high economic activity and employment density, even in zones with relatively low residential populations, such as the Central Business District. The nearest neighbour analysis shows that most exits are located within short distances of each other, especially in densely populated and economically vital areas. However, the analysis also highlights service gaps in less urbanised areas, where exits are spaced farther apart. When combined with real-world population and workplace density data, the results suggest that the Singapore government's transport planning strategy is robust, prioritizing accessibility in high-demand areas while maintaining efficient connectivity across the island. These insights underscore the importance of balanced planning that accounts for both residential needs and workplace accessibility, and they point to potential opportunities for expanding transport services in underserved regions like Lim Chu Kang, should future development plans arise.

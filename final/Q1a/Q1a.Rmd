@@ -1,0 +1,136 @@
+# Q1a
+
+```{r}
+library(spdep); library(sf); library(leaflet)
+```
+
+a)
+
+```{r}
+# Load the data
+amsterdam <- read.csv("AmsterdamRent.csv")
+amsterdam
+
+# Convert to spatial data frame
+amsterdam_sf <- st_as_sf(amsterdam, coords = c("X_coord", "Y_coord"), crs = 4326)
+amsterdam_sf
+```
+
+b)
+
+```{r}
+# i.
+# Transforming CRS
+amsterdam_sf <- st_transform(amsterdam_sf, crs = 7080)
+amsterdam_sf
+
+# Check if geometries are valid after CRS transformation
+validity_check <- st_is_valid(amsterdam_sf)
+validity_check
+
+# If any geometries are invalid, print them
+if (any(!validity_check)) {
+  cat("Invalid geometries found:\n")
+  print(amsterdam_sf[!validity_check, ])
+} else {
+  cat("All geometries are valid.\n")
+}
+
+# Create neighbourhood connectivity object with 4 nearest neighbours
+coords <- st_coordinates(amsterdam_sf)
+nn4 <- knearneigh(coords, k = 4)
+nb_4nn <- knn2nb(nn4)
+
+# Display summary of the connectivity object
+cat("Summary of the neighbourhood connectivity object (4 nearest neighbours):\n")
+summary(nb_4nn)
+
+# ii.
+plot(st_geometry(amsterdam_sf), main = "Connectivity plot (4 nearest neighbours)")
+plot(nb_4nn, coords, add = TRUE, col = "blue", pch = 20)
+```
+
+iii. A distance-based neighbourhood object may not be suitable in this case because the rental transactions in Amsterdam are spatially dispersed, leading to disjoint clusters in certain areas. The plot shows that some areas of the city are isolated from others, resulting in three disconnected subgraphs. This disconnection suggests that a purely distance-based approach may fail to capture the true spatial dependencies across all neighbourhoods, as areas further apart are not connected despite possibly sharing similar characteristics. Instead, a neighbourhood definition based on spatial contiguity or a method that considers the city's structure may be more suitable for capturing relevant spatial relationships.
+
+c)
+
+```{r}
+weights_list <- nb2listw(nb_4nn, style = "W")
+cat("Weights list object created with row-normalised weights style.\n")
+weights_list
+```
+
+d)
+
+```{r}
+# i.
+moran_test_result <- moran.test(amsterdam_sf$Rent, weights_list)
+cat("D-i Moran's test result on 'rent':\n")
+moran_test_result
+```
+
+Comment: Based on the results of Moran's test shown above,
+
+- Moran's I statistic: 0.31726842, which indicates a positive spatial autocorrelation. This means that similar rental prices (either high or low) tend to be geographically clustered in Amsterdam.
+
+- $p$-value: 0.0001677, which is much smaller than the 5% significance level. This low $p$-value suggests that the observed spatial autocorrelation in rental prices is statistically significant.
+
+Since the $p$-value is well below the 5% significance threshold, we reject the null hypothesis of no spatial autocorrelation. The positive Moran's I statistic confirms that rental prices in Amsterdam exhibit significant spatial clustering. In practical terms, areas with higher rents are likely to be near other high-rent areas, while lower-rent areas are similarly clustered. This spatial dependency is essential for understanding the geographic structure of rental prices in the city.
+
+```{r}
+# ii.
+n <- nrow(amsterdam_sf)  # Number of observations
+null_moran_I <- -1 / (n - 1)
+cat("Null Moran's I statistic (expected under the null hypothesis):", null_moran_I, "\n")
+
+# iii.
+local_morans <- localmoran(amsterdam_sf$Rent, weights_list)
+colnames(local_morans) <- c("Local_I", "Expectation", "Variance", "Z_score", "P_value")
+
+# Calculate the global Moran's I as the sum of local Moran's I statistics divided by sum of weights
+global_moran_I_from_locals <- sum(local_morans[, "Local_I"]) / sum(unlist(weights_list$weights))
+cat("Global Moran's I calculated as the sum of local Moran's I statistics:", global_moran_I_from_locals, "\n")
+
+# Display the local Moran's I values for each location
+head(local_morans)
+
+# iv.
+# Calculate local Moran's I statistics for burglaries
+local_morans_rent <- localmoran(amsterdam_sf$Rent, weights_list)
+colnames(local_morans_rent) <- c("Local_I", "Expectation", "Variance", "Z_score", "P_value")
+
+# Count the number of spatial outliers (p-value < 0.05)
+spatial_outliers_count <- sum(local_morans_rent[, "P_value"] < 0.05)
+cat("Number of spatial outliers for rent:", spatial_outliers_count, "\n")
+```
+
+e)
+
+```{r}
+# Geary's C test on the "Rent" variable
+geary_test_result <- geary.test(amsterdam_sf$Rent, weights_list)
+cat("Geary's C test result on 'Rent':\n")
+geary_test_result
+
+# Comparison with Moran's I test results
+cat("\nComparison of Moran's I and Geary's C:\n")
+cat("Moran's I statistic:", moran_test_result$estimate["Moran I statistic"], 
+    "with p-value:", moran_test_result$p.value, "\n")
+cat("Geary's C statistic:", geary_test_result$estimate["Geary C statistic"], 
+    "with p-value:", geary_test_result$p.value, "\n")
+```
+
+Comment: Based on the results of the two tests shown above,
+
+- Moran's I: The Moran's I statistic is 0.3172684 with a $p$-value of 0.0001677. This result indicates significant global spatial autocorrelation in rental prices in Amsterdam, suggesting that similar values (high or low rents) tend to be spatially clustered.
+
+- Geary's C: The Geary's C statistic is 0.7493914 with a $p$-value of 0.0148594. Since this $p$-value is below the 5% significance level, it suggests significant local spatial autocorrelation in the "Rent" variable. Geary's C statistic being below 1 further indicates positive local spatial correlation, with nearby rental prices showing more similarity than would be expected by random chance.
+
+##### Interpretation
+Both tests show significant spatial autocorrelation in the "Rent" variable, but they highlight different aspects:
+
+- Moran's I emphasises global spatial autocorrelation, showing that rental prices are generally clustered across the entire area.
+
+- Geary's C is more sensitive to local spatial differences, supporting the presence of local clusters or pockets where rents are similar.
+
+Together, these results suggest that rental prices in Amsterdam are not only globally clustered but also exhibit localised clusters, potentially due to neighbourhood effects or localised market dynamics.

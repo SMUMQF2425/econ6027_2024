@@ -1,0 +1,32 @@
+---
+title: "ECON6027_5e"
+author: "Dr. Liu"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(spatstat, quietly=T)
+
+data(bramblecanes); plot(bramblecanes) 
+
+# K-function
+kf = Kest(bramblecanes, correction="border"); plot(kf)
+kf.env = envelope(bramblecanes, Kest, correction="border"); plot(kf.env) 
+
+# one tailed envelope using clustered process as the alternative
+kf.env = envelope(bramblecanes, Kest, alternative="greater", correction="border"); plot(kf.env) 
+
+
+# L-function
+lf.env = envelope(bramblecanes, Lest, correction="border"); plot(lf.env) 
+
+# G-function
+gf.env = envelope(bramblecanes, Gest, correction="best"); plot(gf.env) 
+```
+

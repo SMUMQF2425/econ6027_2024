@@ -1,0 +1,195 @@
+---
+title: "ECON6027_5abcd"
+author: "Dr. Liu"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Point Pattern Analysis
+
+There are many planar point pattern (ppp) datasets that comes with the spatstat package. You are encouraged to use these datasets to practice the analytical methods in this chapter. One example is given below.
+
+```{r}
+library(spatstat, quietly=T)
+
+# ppp
+data(cells); class(cells)
+cells
+plot(cells)
+rm(list = ls())
+```
+
+## 5a. Create a ppp object
+
+For this chapter, we will use a generic spatial dataset that is loaded to R in the form of an sf object, to conduct the analysis. First we need to convert the usual sf point object to a ppp object. Start by loading the point observations. In this illustration, we will analyse the reported incidents of breaches of peace in the New Haven area.
+
+```{r}
+library(sf)
+(breach = st_read("breach.shp")) # point data
+(breach = st_transform(breach, crs=2234))
+(breach = breach[ ,-1]) # remove FID column
+st_crs(breach)$proj # breach is projected, good to go
+```
+
+The FID is an object ID created automatically by the shapefile. However, when conducting point pattern analysis spatstat will identify the FID as an attribute (not an ID number). This is distorting to the analysis. So we have removed the FID before proceeding.
+
+In the chunk below, we load the New Haven block polygon.
+
+```{r}
+blocks = st_read("blocks.shp") # New Haven polygon
+blocks = st_transform(blocks, crs=2234)
+table(st_is_valid(blocks)) # all valid
+isTRUE(all.equal(st_crs(breach), st_crs(blocks))) # CRS is projected and same as points
+library(tmap)
+tm_shape(blocks) + tm_polygons() + tm_shape(breach) + tm_dots() + 
+  tm_layout(title = "Incidents of breaches of peace") +
+  tmap_options(check.and.fix = TRUE)
+```
+
+Create the ppp object as follows.
+
+```{r}
+(breach.ppp = as.ppp(breach))
+plot(breach.ppp, pch=20, size=0.5)
+st_bbox(breach)
+```
+
+Add the boundary of New Haven as the window to the points data.
+
+```{r}
+nh = st_union(blocks) # Newhaven outline
+(nh.owin = as.owin(nh)); class(nh.owin)
+Window(breach.ppp) = nh.owin # assign windo to ppp object
+breach.ppp # only 178 points, 2 points are outside the window!
+```
+
+When dealing with point data, you need to see whether there are any duplicated entries. If found, you may apply a simple perturbation function to randomly perturb the locations to remove duplicates.
+
+```{r}
+table(duplicated(breach.ppp)) # many duplicated entries
+(breach.ppp = rjitter(breach.ppp, retry=T)); table(duplicated(breach.ppp))
+plot(breach.ppp, pch=20, size=0.5)
+```
+
+## 5b. QC analysis
+
+Prepare the quadrats and view
+
+```{r}
+(qc = quadratcount(breach.ppp, nx=10, ny=10))
+class(qc)
+plot(qc)
+```
+
+Chi2 (goodness of fit) test
+
+```{r}
+(quad.test = quadrat.test(breach.ppp, nx=10, ny=10))
+```
+
+Test outcome: Reject the null of qc~Po(lambda) at 5% level.
+
+We can run some computations to confirm the test results above...
+
+1. Estimate the null parameter (lambda_0)
+
+```{r}
+# View(quad.test) # inspect the quad.test list object.
+quad.test$observed # gives the observed number of points in each quadrat
+quad.test$parameter # gives the number of df (i.e. n=df+1)
+(n = quad.test$parameter+1)
+(lambda = mean(quad.test$observed)) # Average number of points per quadrat
+```
+
+Null distribution:If X~Po(lambda)
+
+Null vs. observed distribution of counts (optional)
+
+```{r}
+(observed = table(quad.test$observed))
+(max.num = max(quad.test$observed)) # maximum number of observations in a single quadrat
+(max.freq = max(observed)) # maximum frequency
+plot(c(0,max.num),c(0,max.freq), type="n", 
+     xlab="Number of incidents per quadrat (Red=Observed, Blue=Expected)", 
+     ylab="Frequency of Occurances", main="Quadrat counts: Observed vs Expected")
+points(dpois(0:max.num, lambda=lambda)*n, type="l", col="Blue", lwd=2)
+points(observed, col="Red", type="l", lwd=2)
+```
+
+Clearly, when comparing the observed and expected counts, we can say that the point pattern does not follow a HPP as confirmed by the Chi2 test.
+
+## Kernel density estimation
+
+KDE is highly sensitive to the choice of the bandwidth. Here we make two estimates for sigma=500 and sigma=1000 respectively.
+
+```{r}
+plot(density(breach.ppp, sigma=500))
+plot(density(breach.ppp, sigma=1000))
+```
+
+Run ?density.ppp for more information.
+
+Bandwidth selection can also be automated by applying a pre-selected optimal bandwidth selection method. The following chunk uses the famous diggle method. The bandwidth is chosen to minimise the mean-square error criterion defined by Diggle (1985). Alternative methods include: bw.ppl, bw.scott, bw.CvL, bw.frac.
+
+```{r}
+(breach.bw = bw.diggle(breach.ppp))
+breach.kde1 = density(breach.ppp, sigma=bw.diggle(breach.ppp))
+plot(breach.kde1)
+```
+
+## 5d. Nearest neighbour distance analysis
+
+The standard error of the CE index is verified as below (slide 8)
+
+```{r}
+sqrt((4-pi)/(4*pi))
+```
+
+The CE index for the breaches of peace data is computed below with the test following thereafter. See: https://www.rdocumentation.org/packages/spatstat/versions/1.64-1/topics/clarkevans 
+
+```{r}
+clarkevans(breach.ppp, correction="none")
+clarkevans.test(breach.ppp, correction="none", alternative="less")
+```
+
+Here we have conducted a one tailed test: Is the R index significantly smaller than 1 (in other words, do we have reasons to believe clustering in “breach”)?
+
+Based on the test there seem to be significant clustering of incidences related to breaches of peace! Note that the spceific alternative considered in this test is R<1 which means there is clustering. Other alternatives can also be considered. Run ?clarkevans.test
+
+By right the above chunk is all that is needed to conduct a CE test for CSR. However, if you wish to dig deeped into the components of this test and verify how the numbers are calculated, you can use the following (optional calculations).
+
+```{r}
+breach.nnd = nndist(breach.ppp, k=1) # nearest neighbour distances.
+summary(breach.nnd) 
+hist(breach.nnd)
+
+class(breach.nnd)
+breach.nnd = as.matrix(breach.nnd) # convert breach.nnd to a matrix.
+
+(r.bar = sum(breach.nnd)/nrow(breach.nnd)) # Observed average r 
+(Er = 0.5*sqrt(area.owin(nh.owin)/nrow(breach.nnd))) # expected r
+(CE.index = r.bar/Er) 
+(Zstat = ((r.bar-Er)/ 0.26136)*sqrt(nrow(breach.nnd)^2/area.owin(nh.owin))) # test statistic
+```
+
+The p-value given in the test is computed based on this Zstat!
+
+## K-function analysis
+
+```{r}
+kf.env_NH = envelope(breach.ppp, Kest, correction="border"); plot(kf.env_NH) 
+lf.env_NH = envelope(breach.ppp, Lest, correction="border"); plot(lf.env_NH) 
+gf.env_NH = envelope(breach.ppp, Gest, correction="best"); plot(gf.env_NH)
+
+par(mfrow=c(1,3))
+plot(kf.env_NH, main="K-function")
+plot(lf.env_NH, main="L-function") 
+plot(gf.env_NH, main="G-function")
+par(mfrow=c(1,1))
+```
+

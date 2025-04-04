@@ -1,0 +1,215 @@
+---
+title: "ECON6027_6b"
+author: "Dr. Liu"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Areal Pattern Analysis
+
+To illustrate the methods in this section we will use the "eire" dataset that comes with the spData package. This dataset gives the counties of the Irish Republic. Full details can be found in the package notes file. 
+
+```{r}
+library(sf); library(spdep); library(tmap)
+options(scipen = 999) 
+```
+
+We will load and carry out the usual inspections first.
+
+```{r}
+(eire = st_read(system.file("shapes/eire.shp", package="spData")) %>% st_set_crs("+proj=utm +zone=30 +ellps=airy +datum=WGS84 +units=km +no_defs +type=crs"))
+names(eire)
+table(st_is_valid(eire)) # all valid
+plot(st_geometry(eire)) # all contiguous polygons
+st_crs(eire)$proj # projected CRS
+st_crs(eire)$units
+```
+
+In the next chunk, we create the "nb" object using the contiguous polygons based on the queen contiguity criterion. Then we viasualise it on a map of Ireland.
+
+```{r}
+(eire_nb = poly2nb(eire)) # queen contiguity weights
+# plot
+coords = st_point_on_surface(st_geometry(eire))
+plot(st_geometry(eire), border="grey60", axes=F,  main="Queen Contiguity")
+plot(eire_nb, coords, pch=19, cex=0.6, add=T)
+```
+
+The "nb" object must be converted to a weights list object before we can carry out analysis. Here we create two weights lists: one based on the row normalised style and another based on the binary style. The different "wlist" objects will serve different purposes in the analysis.
+
+```{r}
+(eire_lw = nb2listw(eire_nb)) # row normalised style
+(eire_lwB = nb2listw(eire_nb, style="B")) # binary style
+```
+
+## Join count analysis
+
+The main methodology to quantify the relationship between similar or dissimilar attributes in adjacent areas of a binary variable (1/0) is done by assigning two colours: black (B) for attribute 1 and white (W) for attribute 0. If attribute 1 occurs in one area, then the area will be assigned B, if attribute 0 occurs then the area will be assigned W.
+
+Two neighbouring areas are considered “joined”. There are 3 possible types of joins: BB, BW, and WW. Join counts tally the numbers of BB, BW and WW in the study area.
+
+- Positive spatial autocorrelation (clustering) if the number of BW joins is significantly lower than what we would expect by chance.
+
+- Negative spatial autocorrelation (dispersion) if the number of BW joins is significantly higher than what we would expect by chance, 
+
+- CSR if the number of BW joins is approximately the same as what we would expect by chance. 
+
+The premise of the analysis is to compare the observed join counts to the expected join counts from a CSR pattern. The join count statistic is asymptotically normally distributed under the null hypothesis of no spatial autocorrelation. 
+
+In this dataset, Pale is a binary variable. The Pale or the English Pale was the part of Ireland directly under the control of the English government in the late middle ages. Thus Pale is an ideal candidate to be analysed using the join count analysis method.
+
+The derivation of the test assumes that the weights matrix is symmetric. Binary weights are symmetric and we will use "eire_lwB" createed above for this analysis.
+
+```{r}
+eire$pale # pale is binary
+(eire$pale_factor = as.factor(eire$pale == 1))
+summary(eire$pale_factor)
+tm_shape(eire) + tm_polygons(col="pale_factor")
+joincount.multi(eire$pale_factor, listw=eire_lwB) #listw must be B style
+```
+
+The observed BW count (T:F = 21) is significantly less than the expected value under CSR (T:F = 29.5). Sufficient evidence to suggest significant clustering at 5% level of significance. 
+
+Conclusion: Reject H0 at 5% level of significance. 
+
+Jtot is the count of all different-colour joins.
+
+## Moran's I statistic
+
+Moran’s I measures the degree of spatial autocorrelation in ratio and interval measured data (a.k.a. numerical data). Moran’s I statistic is arguably the most used indicator of global spatial autocorrelation. 
+
+The computation of Moran’s I is achieved by dividing the spatial covariation by the total variation. In essence, it is a cross-product statistic between a variable and its spatial lag, with the variable expressed in deviations from its mean.  The resulting value ranges from -1 (perfect dispersion) to +1 (perfect clustering).
+
+### Moran's test for no spatial autocorrelation
+
+There are 26 features in this dataset. Given that 𝐸(𝐼)=−1/(𝑛−1), the null hypothesis is -0.04. The default alternative hypothesis in r is positive autocorrelation (you can change it to negative or two tailed tests)
+
+```{r}
+tm_shape(eire) + tm_polygons(col="A") # clustering observed
+moran.test(eire$A, listw=eire_lw)
+```
+
+Conclusion: Reject the null of no spatial autocorrelation in favour of positive spatial autocorrelation. There seem to be a significant spatial patterning of the in the incidence of group A type blood at county level (for whatever reason). 
+
+### Moran's plot
+
+The Moran scatter plot, consists of a plot with the spatially lagged variable on the y-axis and the original variable on the x-axis. The slope of the linear fit to the scatter plot equals Moran’s I.
+
+The plot has 4 quadrants centred at mean of the attribute and the mean of the lagged attribute value, (mean{x,Lx}), which can be re-scaled to have an origin of (0,0).
+
+- High-High: neighbours with high values surrounded by those with high values (hotpots)
+
+- High-Low/Low-High: neighbours with high values surrounded by those with low values in other words (spatial outliers)
+
+- Low-Low: neighbours with low values surrounded by those with low values (coldspots)
+
+```{r}
+moran.plot(eire$A, listw=eire_lw, main="Moran scatterplot", labels=F)
+```
+
+The significant positive spatial autocorrelation suggested by the test can be visually confirmed here (In statistical analysis the scatterplot comes first which is what you must do when you conduct your own analysis.)
+
+### Local Moran's I statistics
+
+Global Moran’s I statistic for spatial autocorrelation is calculated from local relationships between observed values at spatial units and their neighbours. 
+It is possible to break these measures down into their components (at a location specific level), thus constructing local Moran’s I statistic for spatial autocorrelation.
+
+This belongs to a family of “local indicators for spatial association (LISA) that can be used to identify the degree to which one areal unit is autocorrelated relative to it’s neighbours:
+
+- Detect spatial clusters or outliers at a local level
+
+- Measure spatial autocorrelation at a local level
+
+- Identify spatial patterns or hotpots at a local level
+
+Local Moran’s I statistic is constructed as one of the n components which comprise the global test. The chunk below shows how to derive the local statistics.
+
+```{r}
+localm = localmoran(eire$A, listw=eire_lw)
+head(localm)
+eire$LMORANZ = localm[,4]
+tm_shape(eire) + tm_polygons(col="LMORANZ") + 
+  tm_layout(title="Local Moran's I Z-Statistic")
+```
+
+The sum of the local Moran’s I statistics is proportional to the global Moran’s I statistic as shows below.
+
+```{r}
+sum(localm[,1])/sum(unlist(eire_lw$weights))
+sum(localm[,1])/nrow(eire)
+```
+
+Moran’s I statistic is highly sensitive to the choice of spatial weights matrix. Where the weights do not reflect the “true” structure of spatial interaction, estimated autocorrelation (or lack thereof) may be due to misspecification. Notice how the Moran's I statistic for the same data changes whn we replace the row normalised weights list with the binary weights list.
+
+```{r}
+moran.test(eire$A, listw=eire_lwB)
+```
+
+Row-standardisation in general favours outcomes with fewer neighbours (i.e. assign a higher weight for those), thus maybe biased towards the spatial units along the edges. At present there is no technique in the literature to make a reliable edge correction for row standardised weights. However, in many econometric spatial models, using a row standardised W matrix is the default option (which you may observe in the “spreg” and “spdep” function coding as well).
+
+## Geary's C statistic
+
+Geary’s C is an alternative measure of spatial autocorrelation. It determines the degree of spatial autocorrelation using sum of squared differences paired data values as its measure of covariance. The Geary’s C static ranges from 0 to 2.
+
+Moran’s I is based on cross product of deviations from the mean of a variable at a particular unit and a neighbouring unit, while Geary’s C is a cross product of actual values of a variable at a particular location and another neighbouring unit. Thus, Geary’s C is less likely to be affected much by extremes.
+
+Also, Geary’s C uses the unbiased estimator, in the denominator of the estimator compared to the biased estimator that is used by Moran’s I.
+
+The statistical significance of Geary’s C is also based on a standard normal distribution.
+
+```{r}
+geary.test(eire$A, listw=eire_lw)
+```
+
+Conclusion: Reject the null of no spatial autocorrelation (C=1) in favour of positive spatial autocorrelation. (Notice the inverted nature of the alternative hypothesis.)
+
+## Getis-Ord's G statistics
+
+Global Getis-Ord’s G statistic measures the concentration of high or low values for a given study area. The statistical significance of Getis-Ord’s G is also based on a standard normal distribution. A binary weighting scheme is recommended for this statistic.
+
+```{r}
+globalG.test(eire$A, listw=eire_lwB)
+```
+
+### Local Getis-Ord's G statistics
+
+The local Getis-Ord’s G-statistic consist of a ratio of the weighted average of the values in the neighbouring locations, to the sum of all values, not including the value at the location (i).
+
+The interpretation of the Local Getis-Ord statistics is very straightforward: 
+
+- a value larger than the mean (or, a positive value for a standardized z-value) suggests a high-high cluster or hot spot, 
+
+- a value smaller than the mean (or, negative for a z-value) indicates a low-low cluster or cold spot. 
+
+In contrast to the Local Moran and Local Geary statistics, the Getis-Ord approach does not consider spatial outliers.
+
+```{r}
+localG = localG(eire$A, listw=eire_lwB)
+eire$GO_STAT = localG
+tm_shape(eire) + tm_polygons("GO_STAT")
+```
+
+### Correlogram
+
+In time series a correlogram (also called Auto Correlation Function ACF Plot or Autocorrelation plot) is a visual way to show serial correlation in data that changes over time. Basically it shows for how long (number of lags), temporal memory remains.
+
+A spatial correlogram is the spatial version of the same plot. 
+It gives us important information on how many lags we should consider when considering spatial regression models (should I only consider my immediate neighbour or should I also consider my neighbour’s neighbour as well and so on…!).
+
+```{r}
+correl = sp.correlogram(neighbours=eire_nb, var=eire$A, order=3, method="corr", style="W")
+correlI = sp.correlogram(neighbours=eire_nb, var=eire$A, order=3, method="I", style="W")
+correlC = sp.correlogram(neighbours=eire_nb, var=eire$A, order=3, method="C", style="W")
+par(mfrow=c(1,3))
+plot(correl, main="Contiguity lag orders: correlation")
+plot(correlI, main="Contiguity lag orders: Moran's I")
+plot(correlC, main="Contiguity lag orders: Geary's C")
+par(mfrow=c(1,1))
+```
+
+

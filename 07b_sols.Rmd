@@ -1,0 +1,145 @@
+---
+title: "ECON6017_7b_sols"
+author: "Dr. Liu"
+date: "`r Sys.Date()`"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## SPATIAL REGRESSION: Solutions to ECON6027_7b
+
+Load the packages:
+
+```{r}
+library(spdep, quietly = T); library(spatialreg, quietly = T)
+```
+
+Used Cars data: The dataset is from spData package on US 1960 used car prices. This data frame contains the following columns:
+
+• tax.charges taxes and delivery charges for 1955-9 new cars
+
+• price.1960 1960 used car prices by state
+
+```{r}
+data(used.cars, package="spData")
+ls()
+head(used.cars)
+```
+
+### OLS fit
+
+```{r}
+cars_ols = lm(formula = price.1960 ~ tax.charges, data = used.cars)
+summary(cars_ols)
+```
+
+Both intercept and tax parameter are significant. F test of the model parameters is significant and so are the individual T statistics for tax charges and the intercept. Overall, the linear regression model is significant.
+
+The usual diagnostic tests:
+
+```{r}
+lmtest::bptest(cars_ols)
+tseries::jarque.bera.test(cars_ols$residuals)
+# normtest::jb.norm.test(cars_ols$residuals)
+```
+
+No evidence of heteroskedasticity in the OLS residuals. No evidence of non-normality in the OLS residuals.
+
+Spatial test:
+
+```{r}
+cars_wlist = nb2listw(usa48.nb, style="W")
+lm.morantest(cars_ols, cars_wlist)
+moran.test(used.cars$price.1960, cars_wlist)
+```
+
+Evidence of significant spatial autocorrelation in the OLS residuals based on Moran's test on OLS residuals. Recommended to consider the SEM.
+
+Evidence of significant spatial autocorrelation in the dependent variable based on the Moran's test on the dependent variable. Recommended to consider SLM or SAR.
+
+### Spatial models
+
+- SAR model
+
+```{r}
+cars_sar = spautolm(formula = price.1960 ~ 1, data=used.cars, listw=cars_wlist)
+summary(cars_sar)
+```
+
+The pure spatial lag parameter is highly significant. 
+
+- SLM model
+
+```{r}
+cars_slm = lagsarlm(formula = price.1960 ~ tax.charges, data=used.cars, listw=cars_wlist)
+summary(cars_slm)
+```
+
+The spatial lag parameter is highly significant and tax parameter is not significant as opposed to the  simple linear model. 
+
+- SEM model
+
+```{r}
+cars_sem = errorsarlm(formula = price.1960 ~ tax.charges, data=used.cars, listw=cars_wlist) 
+summary(cars_sem)
+```
+
+The spatial error parameter is highly significant and tax parameter is not significant as opposed to the  simple linear model. 
+
+- SARAR model
+
+```{r}
+cars_sarar = sacsarlm(formula = price.1960 ~ tax.charges, data=used.cars, listw=cars_wlist)
+summary(cars_sarar)
+```
+
+Only the spatial lag parameter is highly significant. The spatial error parameter is not significant suggesting that the SARAR(1,1) model is not suitable. This outcome largely confirms the outcome of the LM test for residual autocorrelation done in conjunction with the estimation of the SLM parameters.
+
+#### Which model to use?
+
+```{r}
+AIC(cars_ols); AIC(cars_sar); AIC(cars_sem); AIC(cars_slm); AIC(cars_sarar)
+```
+
+In the previous investigation on “used.cars”, the spatial models, SLM and SAR specifications were both highly significant. So which model is best suited for the data? We turn to the question of model selection using likelihood-based testing.
+
+1. LM tests
+
+lm.LMtests() function reports the estimates of tests chosen among five statistics for testing for spatial dependence in linear models. 
+
+H0: Simple linear regression model.
+
+```{r}
+lm.LMtests(cars_ols, listw=cars_wlist, test="all")
+```
+
+Considering the robust version of the test, we can conclude that the SLM specification is significant and fits the data well. The SEM specification, however, can be safely rejected.
+
+However, the LM test is unable to compare the SLM model against the comprehensive SARAR(1,1) model. Further, the LM test is unable to compare the SLM model against the simple SAR model. We can use the LR test for this.
+
+2. LR tests (H0: OLS linear model)
+
+```{r}
+LR1.Sarlm(cars_slm) # reject H0
+LR1.Sarlm(cars_sarar) # reject H0
+```
+
+The OLS fit is rejected by both tests.
+
+3. comprehensive LR tests
+
+```{r}
+LR.Sarlm(cars_sem,cars_sarar) # SEM vs SARAR --> reject H0
+LR.Sarlm(cars_slm,cars_sarar) # SLM vs SARAR --> do not reject H0
+LR.Sarlm(cars_sar,cars_slm) # SAR vs SLM --> do not reject H0
+```
+
+Conclusion: Returning to the issue at hand, it seems that the pure SAR model seems to be the most suitable model. Thus, the price of used cars seem to be closely related to the price of used cars in the neighbouring states than the amount of taxes and delivery charges of new cars of each state.
+
+Note: If the most suitable model turned out to be SLM, SEM or the SARAR model, one needs to look for an alternative estimation method since ML estimates are generally biased in small samples (n=48)
+

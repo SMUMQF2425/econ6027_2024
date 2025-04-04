@@ -1,0 +1,207 @@
+# ECON6027: Assignment 1 (50 marks)
+
+Submission format:
+
+1. Original R script or R markdown file
+
+2. HTML/PDF output (knit your script to an html/pdf file for submission)
+
+3. .txt file of the standard deviational ellipses
+
+```{r}
+library(sf); library(tmap); library(aspace)
+```
+
+### Question 1
+a) Load the “cycle_hire” dataset from the package “spData” which is a point dataset of cycle hire points in central London. (5 marks)
+
+```{r}
+# Load the dataset
+cycle_sf = st_read(system.file("shapes/cycle_hire.geojson", package="spData"))
+st_is_longlat(cycle_sf)
+```
+
+b) Compute a “standard deviational ellipse” of the cycle hire points. (5 marks)
+
+```{r}
+# Apply a projection. I used the British National Grid
+# Typically this step is compulsory before you run any calculations.
+cycle_sf = cycle_sf %>% st_transform(27700) 
+tmap_leaflet(tm_shape(cycle_sf) + tm_dots())
+
+# Standard deviational ellipse (using aspace 4.1.0)
+cycle_sde = calc_sde(id=1, points=st_coordinates(cycle_sf))
+
+# change the sde to sf linestring
+(cycle_sde_sf = cycle_sde$LOCATIONS %>% st_as_sf(coords = c("x", "y"), crs=27700) %>% 
+    st_combine() %>% st_cast("LINESTRING"))
+(cycle_sde_sf = st_sf(cycle_sde$ATTRIBUTES, geom=st_geometry(cycle_sde_sf)))
+```
+
+c) Plot both hire points and the ellipse on an interactive map using the leaflet driver “OpenStreetMap”. (5 marks)
+
+```{r}
+# interactive map
+tmap_mode("view")
+tm_shape(cycle_sf) + tm_dots() + 
+  tm_shape(cycle_sde_sf) + tm_lines(col="red", lwd=2) + 
+  tm_layout(main.title = "Cycle Hire Locations in Central London") +
+  tm_basemap(server = "OpenStreetMap")
+tmap_mode("plot")
+```
+
+Don't forget to clear the environment before you proceed.
+
+```{r}
+rm(list=ls())
+```
+
+### Question 2
+The “quakes” data.frame (an inbuilt dataset in R) that gives the locations of 1000 seismic events of MB > 4.0. The events occurred in a cube near Fiji since 1964.
+
+a. Give spatial awareness to this dataset. The coordinate reference system should use the world geodetic system. Generate the head of your dataset. (5 marks)
+
+```{r}
+# inspect data
+data(quakes); head(quakes)
+
+# main
+quakes_sf = st_as_sf(quakes, coords=c("long","lat"))
+st_crs(quakes_sf) = 4326 # it is known that the dataset follows the WGS84.
+quakes_sf
+```
+
+b. Prepare two interactive maps of the recorded “magnitude” and depth of the “location” using “tmap” package. (5 marks)
+
+```{r}
+tmap_mode("view")
+tm_shape(quakes_sf) + tm_dots(col="mag", title = "magnitude")
+tm_shape(quakes_sf) + tm_dots(col="depth")
+tmap_mode("plot")
+```
+
+c. Compute the (i) mean centre, and (ii) the standard deviational ellipse using “magnitude” attribute as weights. (5 marks)
+
+```{r}
+# Descriptive measures cannot be computed using geographic CRS
+# Change the CRS from geographic to projected using UTM 
+# Fiji 1956 / UTM zone 60S - EPSG:3141.
+quakes_sf = st_transform(quakes_sf, crs=3141)
+coords = st_coordinates(quakes_sf)
+mag = quakes_sf$mag
+
+# (i) mean centre
+fiji_mean = calc_mnc(id=2, weighted = T, weights=mag, points=coords)
+(fiji_mean_sf = st_as_sf(fiji_mean$ATTRIBUTES, coords = c("CENTRE.x", "CENTRE.y"), crs=3141))
+
+# (ii) SDE
+fiji_sde = calc_sde(id=1, weighted = T, weights=mag, points=coords)
+(fiji_sde_sf = fiji_sde$LOCATIONS %>% 
+    st_as_sf(coords = c("x", "y"), crs=3141) %>% st_combine() %>% 
+    st_cast("LINESTRING"))
+(fiji_sde_sf = st_sf(fiji_sde$ATTRIBUTES, geom=st_geometry(fiji_sde_sf)))
+```
+
+d. Plot the output of (c) on a static map. Give an appropriate title (5 marks)
+
+```{r}
+# plot
+tm_shape(quakes_sf) + tm_dots(col="mag", title = "magnitude", palette="Blues") + 
+  tm_shape(fiji_mean_sf) + tm_squares(col="black") + 
+  tm_shape(fiji_sde_sf) + tm_lines(col="black") + 
+  tm_layout(main.title="Center and Orientation of Quakes") + 
+  tm_add_legend(type="symbol", col="black", labels="Mean Center", shape=15) + 
+  tm_add_legend(type="line", col="black", labels="SD Ellipse", lty=1)
+# notice how the orientation of the quakes is along the Australian and Pacific plate intersection.
+```
+
+Don't forget to clear the environment before you proceed.
+
+```{r}
+rm(list=ls())
+```
+
+### Question 3
+Variables (in order of appearance):
+
+- Planning area name
+
+- Total population (thousands)
+
+- Percentage of population who are free thinkers
+
+- Percentage of population with no literacy
+
+- Percentage of population with tertiary education
+
+- Percentage of population with only primary education
+
+- Percentage of population in white collar jobs
+
+- Total number of households (thousands)
+
+- Average household size by residents
+
+- Percentage of households with a combined income above the median national income
+
+- Percentage of households with a combined income above $20,000
+
+- Percentage of households with a combined income below $1,000
+
+- Percentage of households that are owner occupied
+
+- Percentage of HDBs
+
+```{r}
+library(dplyr)
+```
+
+a. Load the “sg_house.csv” dataset to R using the read.csv() function. Read the Singapore planning area shapefile from Chapter 1 (shared for your convenience). Combine the two datasets (using an appropriate method). The final object should be an sf object. Your uploaded answer should include a compressed folder of this combined sf object saved as a shapefile. (5 marks)
+
+```{r}
+sg_house = read.csv("sg_house.csv")
+class(sg_house)
+
+# setwd("C:/Users/sfliu/Dropbox/MSc/Lessons/1 Introduction")
+sg_PA = st_read("MP14_PLNG_AREA_WEB_PL.shp") 
+table(st_is_valid(sg_PA)) # 8 false entries
+# It is always a good idea to check the validity of the object before proceeding. 
+# If there are FALSE entries, use st_make_valid to validate the object.
+sg_PA = st_make_valid(sg_PA); table(st_is_valid(sg_PA)) 
+# next time directly the run the following command.
+# sg_PA = st_read("MP14_PLNG_AREA_NO_SEA_PL.shp") %>% st_make_valid()
+
+sg_house_sf = inner_join(sg_house, sg_PA)
+class(sg_house_sf) # is it an sf object?
+(sg_house_sf = st_as_sf(sg_house_sf))
+class(sg_house_sf) # check again...
+
+# Create a shapefile of the object 
+st_write(sg_house_sf, "sg_house.shp", delete_layer=T)
+```
+
+b. Generate a plot (using tmap) of the attribute, percentage of households above median income given by “PCT_ABOVEMEDIN”. Your map should, (5 marks)
+
+1. Include an appropriate title
+
+2. Use the quartiles as the “breaks”
+
+3. Change the line type to “dotted”.
+
+```{r}
+summary(sg_house_sf$PCT_ABOVEMEDIN) # check quartiles
+bins = c(34.52, 43.04, 50, 58.95, 73.22)
+tm_shape(sg_house_sf) + tm_polygons(col="PCT_ABOVEMEDIN", breaks=bins, lty=3) +
+  tm_layout(main.title = "Percentage of Households Above Median Income, SG, 2015")
+# plot(sg_house_sf["PCT_ABOVEMEDIN"], breaks=bins, lty=3, 
+#     main="Percentage of Households Above Median Income, Singapore, 2015")
+```
+
+c. Extract the central region and create a new spatial object. Create a subset of planning areas in the central region that has more than half the households listed as HDBs. (5 marks)
+
+```{r}
+(central_sg = sg_house_sf[sg_house_sf$REGION_C == "CR", ]) # Extract central region
+(central_hdb = subset(central_sg, PCT_HDB > 50))
+
+# Codes may generally differ and that is OK!
+```

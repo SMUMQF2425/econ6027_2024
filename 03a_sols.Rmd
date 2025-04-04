@@ -1,0 +1,87 @@
+
+```{r}
+################
+# 5a Solutions #
+################
+
+library(sf); library(spData); library(tmap)
+
+# Exercise A
+tm_shape(world)+tm_fill()+tm_borders()
+tm_shape(world) + tm_fill(col="darkolivegreen1", alpha=0.5) + 
+  tm_borders(col="blue", lty=6, lwd=1.25)
+
+# Exercise B
+nz_map = tm_shape(nz) + tm_fill() + tm_borders()
+nz_map + tm_shape(nz_height) + tm_bubbles()
+
+# 1
+nz_map + tm_shape(nz_height) + tm_dots()
+
+# 2a, 2b
+nz_map + 
+  tm_shape(nz_height) + 
+  tm_bubbles(size=0.05,col="salmon3", border.col="salmon3")
+
+# 2c
+nz_map + 
+  tm_shape(nz_height) + 
+  tm_symbols(size=0.05,col="salmon3", border.col="salmon3", shape=22)
+nz_map + tm_shape(nz_height) + 
+  tm_squares(size=0.05,col="salmon3", border.col="salmon3")
+# No difference!
+
+# Exercise C
+nz_water = st_union(nz) %>% st_buffer(22200) %>% st_cast(to = "LINESTRING")
+nz_map + tm_shape(nz_water) + tm_lines()
+map1 = nz_map + 
+  tm_shape(nz_height) + tm_bubbles(size=0.05,col="salmon3", border.col="salmon3")
+map2 = nz_map + tm_shape(nz_water) + tm_lines(col="seagreen", lwd=2, lty=2)
+tmap_arrange(map1, map2, nrow=2)
+tmap_save(map2, "my_map.pdf")
+
+# Exercise D
+map1 = tm_shape(nz) + tm_polygons(col = "Median_income", title="1")
+map2a = tm_shape(nz) + tm_polygons(col = "Median_income", n=10, title="2a") 
+breaks = c(0, 23000, 26000, 29000, 32000, 35000)
+map2b = tm_shape(nz) + tm_polygons(col="Median_income", breaks=breaks, title="2b")
+map2c = tm_shape(nz) + tm_polygons(col="Median_income", style="sd", title="2c")
+tmap_arrange(map1, map2a, map2b, map2c, ncol=2)
+tm_shape(nz) + 
+  tm_polygons(col="Median_income", style="sd", legend.hist=T, title="3")
+
+# Exercise E
+tm_shape(nz) + tm_polygons(col = "Median_income", style="sd") # basic map
+tm_shape(nz) + 
+  tm_polygons(col = "Median_income", style="sd", title="Median Income") + 
+  tm_compass() + 
+  tm_layout(main.title="Regional distrbution of median income: NZ", 
+            bg.color="cornflowerblue", compass.type="arrow", frame=F, 
+            legend.outside=T)
+
+# Exercise F
+map1 = tm_shape(nz) + tm_polygons(col = "Median_income", style="sd") + 
+  tm_style("classic") + tm_layout(title="classic")
+map2 = tm_shape(nz) + tm_polygons(col = "Median_income", style="sd") + 
+  tm_style("bw") + tm_layout(title="black & white")
+map3 = tm_shape(nz) + tm_polygons(col = "Median_income", style="sd") + 
+  tm_style("cobalt") + tm_layout(title="cobalt")
+map4 = tm_shape(nz) + tm_polygons(col = "Median_income", style="sd") + 
+  tm_style("col_blind") + tm_layout(title="colour blind")
+map5 = tm_shape(nz) + tm_polygons(col = "Median_income", style="sd") + 
+  tm_style("albatross") + tm_layout(title="albatross")
+map6 = tm_shape(nz) + tm_polygons(col = "Median_income", style="sd") + 
+  tm_style("natural") + tm_layout(title="natural")
+
+
+
+# change directory if needed
+# setwd("C:/Users/sfliu/Dropbox/MSc/Lessons/1 Introduction")
+sg = st_read("MySingapura.shp")
+tmap_mode("view")
+tm_shape(sg) + tm_borders()
+tm_shape(sg) + tm_borders() + tm_basemap(server = "OneMapSG.Default")
+tm_shape(sg) + tm_borders() + tm_basemap(server = "OpenTopoMap")
+tm_shape(sg) + tm_borders() + tm_basemap(server = "Esri.WorldStreetMap")
+```
+

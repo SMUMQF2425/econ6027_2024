@@ -1,0 +1,205 @@
+---
+title: "ECON6027_8b"
+author: "Dr. Liu"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# GEOSPATIAL ANALYSIS
+
+Load the required packages.
+
+```{r}
+library(gstat); library(sf); library(tmap); library(automap)
+```
+
+## Dataset
+
+Load and prep the "fulmar" sightings for the year 1999 dataset.
+
+```{r}
+data(fulmar); fulmar99 = fulmar[fulmar$year==1999, ]
+(fulmar99 = st_as_sf(fulmar99, coords=c("x","y"), crs=32631))
+```
+
+## Kriging
+
+### Empirical Semi-variance 
+
+Estimate the average squared differences between observations for distance bands: semi-variance
+
+```{r}
+evgm = variogram(fulmar~1, data=fulmar99) # automatic bandwidth selection
+# evgm = variogram(fulmar~1, data=fulmar99, boundaries=seq(0,260000,l=53))
+```
+
+Use “fulmar~1” for ordinary or simple kriging (more on this later)
+
+Next we determine the appropriate semi-variogram: trial and error method.
+
+```{r}
+show.vgms()
+vgm()
+plot(evgm) # initial plot
+```
+
+### Fit the empirical semi-variogram to a parametric fit
+
+In the vgm() function, “psill”, “range” and “nugget” are initial guesses. You can use the plot(evgm) to identify the initial guesses.
+
+1. Exponential fit without the nugget effect
+
+```{r}
+(fvgm = fit.variogram(evgm, vgm(psill=12, model="Exp", range=100000)))
+plot(evgm, model=fvgm)
+```
+
+2. Exponential fit with nugget effect
+
+```{r}
+(fvgm = fit.variogram(evgm, vgm(psill=10, model="Exp", range=100000, nugget=2)))
+plot(evgm, model=fvgm, main="model=exponential")
+```
+
+3. Activity A
+
+```{r}
+(fvgm = fit.variogram(evgm, vgm(psill=10, model="Gau", range=100000, nugget=2)))
+plot(evgm, model=fvgm, main="model=Gaussian")
+```
+
+Alternative model fits: cir, pen, sph, bessel
+
+4. Automatically fitting a variogram using the "automap" package
+
+```{r}
+fulmar99.sp = as(fulmar99, "Spatial") # automap currently accepts only projected sp objects.
+(autovgm = autofitVariogram(fulmar~1, fulmar99.sp))
+plot(autovgm)
+class(autovgm)
+```
+
+We will use the Gaussian model.
+
+### Generate the set of unsampled points
+
+The following unsampled points will be the locations we estimate the "fulmar" sighting values for.
+
+```{r}
+data(ncp.grid) # a set of unsampled points to reconstruct the surface
+head(ncp.grid) # in practice you need to generate this using a random sample function
+(ncp.gridsf = st_as_sf(ncp.grid, coords=c("x","y"), crs=32631))
+```
+
+### 1. Ordinary kriging estimate in R
+
+f(x) = const
+
+```{r}
+(krig.est = krige(fulmar~1, fulmar99, newdata=ncp.gridsf, model=fvgm))
+```
+
+- Variable 1: prediction
+- Variable 2: variance
+- If no variogram is specified to the argument “model”, the function defaults to IDW interpolation with idp=2.
+
+```{r}
+summary(krig.est) 
+```
+
+Notice the negative frequencies, which must be “eliminated” in the plot.
+
+OK Plot:
+
+```{r}
+OK_pred_map = tm_shape(krig.est) + 
+  tm_dots(col="var1.pred", palette="YlGnBu", shape=15, size = 0.2, 
+          breaks=c(-Inf,2,4,6,8,10,12,14,Inf), title="Fulmar density estimation, OK")
+OK_var_map = tm_shape(krig.est) + 
+  tm_dots(col="var1.var", palette="Blues", shape=15, size = 0.2, 
+          title="Variance of OK estimate")
+tmap_arrange(OK_pred_map, OK_var_map)
+```
+
+Variances are good to get a sense of the reliability of the estimates. Interpolations are at its most reliable in the light shaded areas with many observations close to the points compared to the dark shaded areas.
+
+### 2. Simple kriging estimate in R
+
+If you specify a value to the “beta” argument in the krige function, then the output is the simple kriging estimate. We will use the OLS estimate as the “beta” value (which is the same as the average fulmar sightings - 1.116475).
+
+```{r}
+lm(fulmar~1, fulmar99)
+mean(fulmar99$fulmar)
+```
+
+Hence, the beta is specified as the mean of the observations.
+
+```{r}
+skrig.est = krige(fulmar~1, fulmar99, newdata=ncp.gridsf, beta=mean(fulmar99$fulmar), model=fvgm)
+summary(skrig.est) # negative estimates present!
+```
+
+SK Plot:
+
+```{r}
+SK_pred_map = tm_shape(skrig.est) + 
+  tm_dots(col="var1.pred", palette="YlGnBu", shape=15, size = 0.2,
+          breaks=c(-Inf,2,4,6,8,10,12,14,Inf), title="Fulmar density estimation, SK")
+SK_var_map = tm_shape(skrig.est) + 
+  tm_dots(col="var1.var", palette="Blues", shape=15, size = 0.2, 
+          title="Variance of SK estimate")
+tmap_arrange(SK_pred_map, SK_var_map)
+```
+
+#### OK vs. SK
+
+```{r}
+tmap_arrange(OK_pred_map, SK_pred_map)
+```
+
+Notice there is not much difference between OK and SK, why?
+
+This reiterates the fact that all kriging techniques honour data characteristics, preserve the mean (trend) and preserve the spatial autocorrelation structure and typically OK is a safe bet in many situations.
+
+### 3. Universal kriging estimate in R
+
+If we specify a regression equation in the krige function, then the output is the universal kriging estimate. You may run some possible regressions and select the one that fits the data the best. 
+
+```{r}
+AIC(lm(fulmar~depth+coast, fulmar99)) # model 1
+AIC(lm(fulmar~depth, fulmar99)) # model 2
+AIC(lm(fulmar~coast, fulmar99)) # model 3
+AIC(lm(fulmar~1, fulmar99)) # model 0
+```
+
+Model 1 has the smallest AIC and hence is selected.
+
+```{r}
+(ukrig.est = krige(fulmar~depth+coast, fulmar99, newdata=ncp.gridsf, model=fvgm))
+summary(ukrig.est) 
+```
+
+UK Plot:
+
+```{r}
+UK_pred_map = tm_shape(ukrig.est) + 
+  tm_dots(col="var1.pred", palette="YlGnBu", shape=15, size = 0.2,
+          breaks=c(-Inf,2,4,6,8,10,12,14,Inf), title="Fulmar density estimation, UK")
+UK_var_map = tm_shape(ukrig.est) + 
+  tm_dots(col="var1.var", palette="Blues", shape=15, size = 0.2, 
+          title="Variance of UK estimate")
+tmap_arrange(UK_pred_map, UK_var_map)
+```
+
+#### OK vs. SK vs. UK
+
+```{r}
+tmap_arrange(OK_pred_map, SK_pred_map, UK_pred_map)
+```
+
+As before, notice there is not much difference among the three estimates. So in reality one needs not employ all three methods. Ordinary Kriging is the usual default option.

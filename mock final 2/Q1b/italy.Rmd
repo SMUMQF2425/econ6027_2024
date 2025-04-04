@@ -1,0 +1,95 @@
+# Question 1B: Spatial Regression (20 marks)
+
+Shared with you are two files:
+
+1. “italy.shapefile”, a shapefile consisting geometries of the Italian regions along with the following attributes,
+
+a. REGION: name of the Italian region
+
+b. VAR_UNEMP: variation in unemployment
+
+c. VAR_RGDP: variation in real GDP
+
+2. “it.nb”, a GAL file to generate queen contiguity neighbours of the Italian regions.
+
+```{r}
+library(sf); library(spdep); library(spatialreg)
+```
+
+Answer the following questions:
+
+a) (5 marks) Load the italy.shapefile and regress VAR_UNEMP on VAR_RGDP. (The inverse relationship between the variation in unemployment and variation in real GDP is known as Okun’s law in the economics literature.)
+
+```{r}
+(italy = st_read("italy_okun.shp"))
+
+# OLS
+OLS = lm(VAR_UNEMP~VAR_RGDP, data=italy)
+```
+
+a. Show the summary of the regression.
+
+```{r}
+summary(OLS)
+```
+
+b. Give a scatterplot of the variables along with the fitted line.
+
+```{r}
+plot(italy$VAR_RGDP,italy$VAR_UNEMP, main="Okun's Law in Italian Regions", 
+     ylab="Variation of unemplyment rate", xlab="Variation of real GDP")
+abline(OLS,col="Blue")
+```
+
+c. Check for homoskedasticity and normality of the regression errors.
+
+```{r}
+lmtest::bptest(OLS) # Do not reject H0: homoskedasticity
+tseries::jarque.bera.test(OLS$residuals) # Do not reject H0: normal
+```
+
+b) (5 marks) Load the GAL file and create a neighbourhood connectivity plot on a map of Italy. Conduct Moran’s tests on the OLS residuals and the model variables to check whether spatial spill-over effects need to be considered in the model.
+
+```{r}
+# nb
+# (it_nb = poly2nb(italy))
+(it_nb = read.gal("italy.gal"))
+
+it_coords = st_point_on_surface(st_geometry(italy))
+plot(st_geometry(italy), border="grey60",  main="Queen Contiguity")
+plot(it_nb, it_coords, pch=19, cex=0.6, add=T)
+
+(it_lw = nb2listw(it_nb))
+
+# Tests to detect spatial autocorrelation
+
+# in OLS residuals
+lm.morantest(OLS, it_lw) # Reject null of CSR
+moran.plot(OLS$residuals, it_lw, main="Moran Plot for OLS residuals")
+
+# in other variables
+moran.test(italy$VAR_UNEMP, it_lw) # Reject null of CSR
+moran.test(italy$VAR_RGDP, it_lw) # Do not reject the null of CSR
+```
+
+c) (10 marks) Run the usual spatial regressions and conduct appropriate tests to identify the most suitable spatial regression model.
+
+```{r}
+unemp_SAR = spautolm(formula = VAR_UNEMP ~ 1, data=italy, listw=it_lw)
+unemp_SLM = lagsarlm(formula = VAR_UNEMP ~ VAR_RGDP, data=italy, listw=it_lw)
+unemp_SEM = errorsarlm(formula = VAR_UNEMP ~ VAR_RGDP, data=italy, listw=it_lw)
+unemp_SARAR = sacsarlm(formula = VAR_UNEMP ~ VAR_RGDP, data=italy, listw=it_lw)
+
+# tests
+lm.LMtests(OLS, listw=it_lw, test="all") # possible SLM
+
+LR1.Sarlm(unemp_SLM) # Reject H0:OLS
+LR1.Sarlm(unemp_SARAR) # Reject H0:OLS
+LR1.Sarlm(unemp_SEM) # Reject H0:OLS
+
+LR.Sarlm(unemp_SEM,unemp_SARAR) # Reject H0
+LR.Sarlm(unemp_SLM,unemp_SARAR) # Reject H0
+LR.Sarlm(unemp_SAR,unemp_SLM) # Reject H0
+
+# Overall SARAR model is better suited.
+```
